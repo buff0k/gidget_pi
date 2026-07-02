@@ -1,0 +1,18 @@
+# Runtime/generated config and state
+gidget/config/users.json
+gidget/status_state.json
+gidget/data/tracks/*.jsonl
+
+# Python/cache
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local virtualenvs
+.venv/
+gidget/.venv/
+
+# Backups/logs
+*.backup
+*.bak
+*.log

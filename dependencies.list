@@ -1,0 +1,18 @@
+# APT packages required by Gidget Pi.
+# Lines beginning with # are ignored by install.sh/update.sh.
+git
+sudo
+rsync
+python3
+python3-venv
+python3-pip
+python3-dev
+build-essential
+i2c-tools
+iw
+wireless-tools
+network-manager
+fonts-dejavu-core
+python3-pil
+python3-libgpiod
+libgpiod2
