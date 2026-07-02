@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.venv/
+gidget/config/users.json
+gidget/status_state.json
+gidget/data/tracks/*.jsonl
+*.log
+*.bak
