@@ -1,0 +1,19 @@
+[Unit]
+Description=Gidget OLED Status Display
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=gidget
+Group=gidget
+WorkingDirectory=/opt/gidget
+ExecStartPre=/bin/sleep 5
+ExecStart=/opt/gidget/.venv/bin/python /opt/gidget/oled_status.py
+Restart=always
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=5
+
+[Install]
+WantedBy=multi-user.target

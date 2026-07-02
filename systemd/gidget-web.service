@@ -1,0 +1,16 @@
+[Unit]
+Description=Gidget Web Dashboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=gidget
+Group=gidget
+WorkingDirectory=/opt/gidget
+ExecStart=/opt/gidget/.venv/bin/python /opt/gidget/app.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
