@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+
+{% set active_page = "history" %}
+
+{% block head %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+{% endblock %}
+
+{% block content %}
+<section>
+    <div class="map-wrap">
+        <div id="historyMap"></div>
+    </div>
+
+    <div class="history-panel">
+        <div class="row">
+            <button id="liveBtn">Live</button>
+            <button id="backBtn">◀ Back</button>
+            <button id="playBtn">Play</button>
+            <button id="forwardBtn">Forward ▶</button>
+        </div>
+
+        <div class="row">
+            <label for="dateSelect">Loaded date</label>
+            <select id="dateSelect"></select>
+
+            <button id="loadSelectedDateBtn">Load Selected Date</button>
+            <button id="loadAllDatesBtn">Load Full History</button>
+            <button id="clearHistoryBtn">Clear Loaded History</button>
+        </div>
+
+        <div class="row">
+            <input id="replaySlider" type="range" min="0" max="0" value="0">
+        </div>
+
+        <div class="row value" id="historyLoadStatus">
+            Waiting for track dates...
+        </div>
+
+        <div class="row value" id="pointInfo">
+            No track points yet.
+        </div>
+
+        <div class="row">
+            <a href="/api/status">Status JSON</a>
+            <a href="/api/track/dates">Track Dates JSON</a>
+            <a href="/api/track?limit=1000">Latest Track JSON</a>
+        </div>
+    </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/history.js"></script>
+{% endblock %}
