@@ -32,7 +32,20 @@ function setStatus(ok, error) {
     }
 }
 
+function resizeCanvasForDisplay() {
+    const rect = canvas.getBoundingClientRect();
+    const width = Math.max(320, Math.floor(rect.width));
+    const height = Math.max(280, Math.floor(rect.height || 420));
+
+    if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
+    }
+}
+
 function drawLidar(points, maxDisplayMm) {
+    resizeCanvasForDisplay();
+
     const width = canvas.width;
     const height = canvas.height;
     const padLeft = 58;
@@ -78,7 +91,7 @@ function drawLidar(points, maxDisplayMm) {
         return;
     }
 
-    const recent = points.slice(-180);
+    const recent = points.slice(-120);
     const n = recent.length;
 
     ctx.strokeStyle = "#aaa";
@@ -102,7 +115,7 @@ function drawLidar(points, maxDisplayMm) {
         const y = padTop + plotHeight - ((distance / maxMm) * plotHeight);
 
         ctx.beginPath();
-        ctx.arc(x, y, 3, 0, Math.PI * 2);
+        ctx.arc(x, y, 2, 0, Math.PI * 2);
         ctx.fillStyle = "#ddd";
         ctx.fill();
     });
@@ -113,19 +126,18 @@ function drawLidar(points, maxDisplayMm) {
 
 async function refreshLidar() {
     try {
-        const res = await fetch("/api/status");
+        const res = await fetch("/lidar/api/state", {cache: "no-store"});
 
         if (res.status === 401) {
             window.location.href = "/auth/login";
             return;
         }
 
-        const status = await res.json();
-        const lidar = status.lidar || {};
+        const lidar = await res.json();
         const points = lidar.points || [];
 
         document.getElementById("topStatus").textContent =
-            `${status.hostname} | LIDAR ${lidar.ok === true ? "ok" : "n/a"} | ${fmt(lidar.distance_mm, " mm")}`;
+            `LIDAR ${lidar.ok === true ? "ok" : "n/a"} | ${fmt(lidar.distance_mm, " mm")} | ${fmt(lidar.sensor)}`;
 
         setStatus(lidar.ok, lidar.error);
         setText(sensorEl, fmt(lidar.sensor));
@@ -143,4 +155,5 @@ async function refreshLidar() {
 }
 
 refreshLidar();
-setInterval(refreshLidar, 500);
+setInterval(refreshLidar, 200);
+window.addEventListener("resize", () => refreshLidar());
