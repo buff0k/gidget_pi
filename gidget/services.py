@@ -9,6 +9,7 @@ from pathlib import Path
 BASE_DIR = Path("/opt/gidget")
 STATE_FILE = BASE_DIR / "status_state.json"
 ENVIRONMENT_FILE = BASE_DIR / "environment_state.json"
+LIDAR_FILE = BASE_DIR / "lidar_state.json"
 TRACK_DIR = BASE_DIR / "data" / "tracks"
 
 
@@ -41,6 +42,10 @@ def load_state():
 
 def load_environment():
     return load_json_file(ENVIRONMENT_FILE)
+
+
+def load_lidar():
+    return load_json_file(LIDAR_FILE)
 
 
 def get_ip():
@@ -176,6 +181,7 @@ def current_status():
         "uptime_seconds": get_uptime(),
         "gps": state.get("gps", {}),
         "environment": load_environment(),
+        "lidar": load_lidar(),
     }
 
 
