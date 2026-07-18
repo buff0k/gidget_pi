@@ -23,6 +23,7 @@ PAGE_MODULES = [
     "pages.home",
     "pages.history",
     "pages.gps_telemetry",
+    "pages.lidar",
     "pages.config_page",
     "pages.files",
     "pages.users",
