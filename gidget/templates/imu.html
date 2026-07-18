@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+
+{% set active_page = "imu" %}
+
+{% block content %}
+<section class="dashboard single">
+    <div class="card">
+        <h2>BMI160 IMU</h2>
+
+        <div class="grid">
+            <div class="metric"><div class="label">Status</div><div id="imuStatus" class="value">n/a</div></div>
+            <div class="metric"><div class="label">Sensor</div><div id="imuSensor" class="value">n/a</div></div>
+            <div class="metric"><div class="label">Address</div><div id="imuAddress" class="value">n/a</div></div>
+            <div class="metric"><div class="label">Temperature</div><div id="imuTemperature" class="value">n/a</div></div>
+            <div class="metric"><div class="label">Accel Magnitude</div><div id="accelMagnitude" class="value">n/a</div></div>
+            <div class="metric"><div class="label">Gyro Magnitude</div><div id="gyroMagnitude" class="value">n/a</div></div>
+            <div class="metric"><div class="label">Pitch</div><div id="pitch" class="value">n/a</div></div>
+            <div class="metric"><div class="label">Roll</div><div id="roll" class="value">n/a</div></div>
+            <div class="metric"><div class="label">Last Update</div><div id="imuTimestamp" class="value">n/a</div></div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Orientation</h2>
+        <div class="imu-visuals">
+            <canvas id="tiltCanvas" width="520" height="280"></canvas>
+            <canvas id="imuChart" width="520" height="280"></canvas>
+        </div>
+        <p id="imuMeta" class="muted">Waiting for IMU samples...</p>
+    </div>
+
+    <div class="card">
+        <h2>Raw Axes</h2>
+        <div class="axis-grid">
+            <div>
+                <h3>Acceleration m/s²</h3>
+                <pre id="accelRaw">{}</pre>
+            </div>
+            <div>
+                <h3>Gyro °/s</h3>
+                <pre id="gyroRaw">{}</pre>
+            </div>
+        </div>
+        <h3>State JSON</h3>
+        <pre id="imuJson">{}</pre>
+    </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/imu.js"></script>
+{% endblock %}
