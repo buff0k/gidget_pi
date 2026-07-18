@@ -8,7 +8,7 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENV_DIR="${APP_DIR}/.venv"
 SUDOERS_FILE="/etc/sudoers.d/gidget"
 SYSTEMD_DIR="/etc/systemd/system"
-SERVICES=(gidget-gps.service gidget-env.service gidget-oled.service gidget-web.service)
+SERVICES=(gidget-gps.service gidget-env.service gidget-lidar.service gidget-oled.service gidget-web.service)
 
 log() { printf '\n[update] %s\n' "$*"; }
 fail() { printf '\n[update] ERROR: %s\n' "$*" >&2; exit 1; }
@@ -121,6 +121,7 @@ sync_application_files() {
         --exclude 'config/users.json' \
         --exclude 'status_state.json' \
         --exclude 'environment_state.json' \
+        --exclude 'lidar_state.json' \
         --exclude 'data/tracks/*.jsonl' \
         "${REPO_DIR}/gidget/" "${APP_DIR}/"
 
@@ -136,6 +137,10 @@ ensure_runtime_files() {
 
     if [ ! -f "${APP_DIR}/environment_state.json" ]; then
         printf '{}\n' > "${APP_DIR}/environment_state.json"
+    fi
+
+    if [ ! -f "${APP_DIR}/lidar_state.json" ]; then
+        printf '{}\n' > "${APP_DIR}/lidar_state.json"
     fi
 
     if [ ! -f "${APP_DIR}/config/users.json" ]; then
@@ -154,6 +159,7 @@ install_systemd_services() {
 
     install -m 0644 "${REPO_DIR}/systemd/gidget-gps.service" "${SYSTEMD_DIR}/gidget-gps.service"
     install -m 0644 "${REPO_DIR}/systemd/gidget-env.service" "${SYSTEMD_DIR}/gidget-env.service"
+    install -m 0644 "${REPO_DIR}/systemd/gidget-lidar.service" "${SYSTEMD_DIR}/gidget-lidar.service"
     install -m 0644 "${REPO_DIR}/systemd/gidget-oled.service" "${SYSTEMD_DIR}/gidget-oled.service"
     install -m 0644 "${REPO_DIR}/systemd/gidget-web.service" "${SYSTEMD_DIR}/gidget-web.service"
 }
@@ -164,6 +170,7 @@ install_sudoers() {
     cat > "${SUDOERS_FILE}" <<'EOF_SUDOERS'
 gidget ALL=(root) NOPASSWD: /usr/bin/nmcli
 gidget ALL=(root) NOPASSWD: /usr/bin/systemctl restart gidget-env.service
+gidget ALL=(root) NOPASSWD: /usr/bin/systemctl restart gidget-lidar.service
 gidget ALL=(root) NOPASSWD: /usr/bin/systemctl restart gidget-oled.service
 gidget ALL=(root) NOPASSWD: /usr/bin/systemctl restart gidget-gps.service
 gidget ALL=(root) NOPASSWD: /usr/bin/systemctl restart gidget-web.service
@@ -189,6 +196,7 @@ fix_permissions() {
     chmod 0640 "${APP_DIR}/config/users.json" 2>/dev/null || true
     chmod 0644 "${APP_DIR}/status_state.json" 2>/dev/null || true
     chmod 0644 "${APP_DIR}/environment_state.json" 2>/dev/null || true
+    chmod 0644 "${APP_DIR}/lidar_state.json" 2>/dev/null || true
     chmod 0755 "${APP_DIR}/data" "${APP_DIR}/data/tracks" 2>/dev/null || true
 }
 
