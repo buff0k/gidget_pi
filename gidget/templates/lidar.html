@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+
+{% set active_page = "lidar" %}
+
+{% block content %}
+<section class="page-wrap">
+    <div class="card">
+        <h2>LIDAR</h2>
+        <p class="muted">
+            Live VL53L0X/VL53L1X range data. This is a fixed forward-facing range sensor, so the point map is a time/distance strip rather than a true 2-D scan.
+        </p>
+
+        <div class="grid">
+            <div class="metric"><div class="label">Status</div><div id="lidarStatus" class="value">n/a</div></div>
+            <div class="metric"><div class="label">Sensor</div><div id="lidarSensor" class="value">n/a</div></div>
+            <div class="metric"><div class="label">Address</div><div id="lidarAddress" class="value">n/a</div></div>
+            <div class="metric"><div class="label">Distance</div><div id="lidarDistance" class="value">n/a</div></div>
+            <div class="metric"><div class="label">Last Update</div><div id="lidarTimestamp" class="value">n/a</div></div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Range Point Map</h2>
+        <canvas id="lidarCanvas" width="900" height="420"></canvas>
+        <div class="viewer-meta" id="lidarMeta">Waiting for samples...</div>
+    </div>
+
+    <div class="card">
+        <h2>Raw LIDAR State</h2>
+        <pre id="lidarJson" class="terminal">Waiting for LIDAR...</pre>
+    </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/lidar.js"></script>
+{% endblock %}
