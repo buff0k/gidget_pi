@@ -91,7 +91,7 @@ function drawLidar(points, maxDisplayMm) {
         return;
     }
 
-    const recent = points.slice(-120);
+    const recent = points.slice(-60);
     const n = recent.length;
 
     ctx.strokeStyle = "#aaa";
@@ -155,5 +155,5 @@ async function refreshLidar() {
 }
 
 refreshLidar();
-setInterval(refreshLidar, 200);
+setInterval(refreshLidar, 1000);
 window.addEventListener("resize", () => refreshLidar());
