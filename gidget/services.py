@@ -10,6 +10,7 @@ BASE_DIR = Path("/opt/gidget")
 STATE_FILE = BASE_DIR / "status_state.json"
 ENVIRONMENT_FILE = BASE_DIR / "environment_state.json"
 LIDAR_FILE = BASE_DIR / "lidar_state.json"
+IMU_FILE = BASE_DIR / "imu_state.json"
 TRACK_DIR = BASE_DIR / "data" / "tracks"
 CPU_SNAPSHOT_FILE = Path("/tmp/gidget_cpu_snapshot.json")
 
@@ -49,6 +50,10 @@ def load_lidar():
     return load_json_file(LIDAR_FILE)
 
 
+def load_imu():
+    return load_json_file(IMU_FILE)
+
+
 def get_ip():
     ip = run_cmd("ip -4 addr show wlan0 | awk '/inet / {print $2}' | cut -d/ -f1")
     return ip or "No IP"
@@ -57,10 +62,7 @@ def get_ip():
 def get_wifi_signal():
     output = run_cmd("iw dev wlan0 link")
     if not output or "Not connected" in output:
-        return {
-            "ssid": "WiFi down",
-            "signal": "n/a",
-        }
+        return {"ssid": "WiFi down", "signal": "n/a"}
 
     ssid = "unknown"
     signal = "n/a"
@@ -72,10 +74,7 @@ def get_wifi_signal():
         elif line.startswith("signal:"):
             signal = line.replace("signal:", "").strip()
 
-    return {
-        "ssid": ssid,
-        "signal": signal,
-    }
+    return {"ssid": ssid, "signal": signal}
 
 
 def get_cpu_temp():
@@ -110,16 +109,18 @@ def get_cpu_usage():
     cores = 1
 
     try:
-        cores = max(1, len([line for line in Path("/proc/stat").read_text().splitlines() if line.startswith("cpu") and line[3:4].isdigit()]))
+        cores = max(
+            1,
+            len([
+                line for line in Path("/proc/stat").read_text().splitlines()
+                if line.startswith("cpu") and line[3:4].isdigit()
+            ]),
+        )
     except Exception:
         pass
 
     if not current:
-        return {
-            "used_percent": None,
-            "per_core_percent": None,
-            "cores": cores,
-        }
+        return {"used_percent": None, "per_core_percent": None, "cores": cores}
 
     previous = load_json_file(CPU_SNAPSHOT_FILE)
 
@@ -129,11 +130,7 @@ def get_cpu_usage():
         pass
 
     if not previous or previous.get("total") is None or previous.get("idle") is None:
-        return {
-            "used_percent": None,
-            "per_core_percent": None,
-            "cores": cores,
-        }
+        return {"used_percent": None, "per_core_percent": None, "cores": cores}
 
     total_delta = current["total"] - int(previous.get("total", 0))
     idle_delta = current["idle"] - int(previous.get("idle", 0))
@@ -159,11 +156,7 @@ def get_load_average():
             "fifteen_min": float(fifteen),
         }
     except Exception:
-        return {
-            "one_min": None,
-            "five_min": None,
-            "fifteen_min": None,
-        }
+        return {"one_min": None, "five_min": None, "fifteen_min": None}
 
 
 def get_memory_usage():
@@ -240,6 +233,7 @@ def current_status():
         "gps": state.get("gps", {}),
         "environment": load_environment(),
         "lidar": load_lidar(),
+        "imu": load_imu(),
     }
 
 
