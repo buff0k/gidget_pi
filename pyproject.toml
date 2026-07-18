@@ -18,5 +18,5 @@ dependencies = [
     "adafruit-circuitpython-ahtx0>=1.0",
     "adafruit-circuitpython-bmp280>=3.3",
     "adafruit-circuitpython-vl53l0x>=3.6",
-    "adafruit-circuitpython-vl53l1x>=3.6"
+    "adafruit-circuitpython-vl53l1x>=1.2"
 ]
