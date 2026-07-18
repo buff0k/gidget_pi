@@ -1,0 +1,15 @@
+[Unit]
+Description=Gidget BMI160 IMU Reader
+After=multi-user.target
+
+[Service]
+Type=simple
+User=gidget
+Group=gidget
+WorkingDirectory=/opt/gidget
+ExecStart=/opt/gidget/.venv/bin/python /opt/gidget/imu_reader.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
