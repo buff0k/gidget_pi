@@ -15,7 +15,7 @@ fail() { printf '\n[update] ERROR: %s\n' "$*" >&2; exit 1; }
 
 require_root() {
     if [ "${EUID}" -ne 0 ]; then
-        fail "Run this updater as root, for example: sudo ./update.sh"
+        fail "Run this updater as root, for example: sudo bash ./update.sh"
     fi
 }
 
@@ -23,11 +23,25 @@ read_apt_dependencies() {
     sed 's/#.*$//' "${REPO_DIR}/dependencies.list" | awk 'NF {print $1}'
 }
 
+prepare_git_checkout() {
+    if [ ! -d "${REPO_DIR}/.git" ]; then
+        return
+    fi
+
+    # The repo is normally updated from a Pi where scripts may be chmod +x locally.
+    # GitHub's contents API stores files as 100644, so local executable-bit changes
+    # can otherwise block git pull with "local changes would be overwritten".
+    git -C "${REPO_DIR}" config core.fileMode false
+    git -C "${REPO_DIR}" update-index --refresh >/dev/null 2>&1 || true
+}
+
 maybe_reexec_after_git_pull() {
     if [ ! -d "${REPO_DIR}/.git" ]; then
         log "No .git directory found; skipping git pull"
         return
     fi
+
+    prepare_git_checkout
 
     log "Pulling latest code from git"
 
