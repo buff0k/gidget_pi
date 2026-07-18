@@ -11,6 +11,7 @@ STATE_FILE = BASE_DIR / "status_state.json"
 ENVIRONMENT_FILE = BASE_DIR / "environment_state.json"
 LIDAR_FILE = BASE_DIR / "lidar_state.json"
 TRACK_DIR = BASE_DIR / "data" / "tracks"
+CPU_SNAPSHOT_FILE = Path("/tmp/gidget_cpu_snapshot.json")
 
 
 def run_cmd(cmd, timeout=2):
@@ -91,6 +92,62 @@ def get_uptime():
         return seconds
     except Exception:
         return None
+
+
+def read_cpu_times():
+    try:
+        parts = Path("/proc/stat").read_text().splitlines()[0].split()
+        values = [int(value) for value in parts[1:]]
+        idle = values[3] + values[4]
+        total = sum(values)
+        return {"idle": idle, "total": total}
+    except Exception:
+        return None
+
+
+def get_cpu_usage():
+    current = read_cpu_times()
+    cores = 1
+
+    try:
+        cores = max(1, len([line for line in Path("/proc/stat").read_text().splitlines() if line.startswith("cpu") and line[3:4].isdigit()]))
+    except Exception:
+        pass
+
+    if not current:
+        return {
+            "used_percent": None,
+            "per_core_percent": None,
+            "cores": cores,
+        }
+
+    previous = load_json_file(CPU_SNAPSHOT_FILE)
+
+    try:
+        CPU_SNAPSHOT_FILE.write_text(json.dumps(current, separators=(",", ":")))
+    except Exception:
+        pass
+
+    if not previous or previous.get("total") is None or previous.get("idle") is None:
+        return {
+            "used_percent": None,
+            "per_core_percent": None,
+            "cores": cores,
+        }
+
+    total_delta = current["total"] - int(previous.get("total", 0))
+    idle_delta = current["idle"] - int(previous.get("idle", 0))
+
+    if total_delta <= 0:
+        used_percent = None
+    else:
+        used_percent = round(((total_delta - idle_delta) / total_delta) * 100, 1)
+
+    return {
+        "used_percent": used_percent,
+        "per_core_percent": used_percent,
+        "cores": cores,
+    }
 
 
 def get_load_average():
@@ -175,6 +232,7 @@ def current_status():
         "ip": get_ip(),
         "wifi": get_wifi_signal(),
         "cpu_temp_c": get_cpu_temp(),
+        "cpu_usage": get_cpu_usage(),
         "load_average": get_load_average(),
         "memory": get_memory_usage(),
         "storage": get_storage_usage("/"),
