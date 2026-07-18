@@ -89,16 +89,16 @@ async function refreshStatus() {
 
         const gps = status.gps || {};
         const wifi = status.wifi || {};
-        const load = status.load_average || {};
         const memory = status.memory || {};
         const storage = status.storage || {};
         const environment = status.environment || {};
+        const cpuUsage = status.cpu_usage || {};
         const constellations = gps.constellations || [];
 
         document.getElementById("topStatus").textContent =
             `${status.hostname} | ${status.ip} | ${wifi.ssid || "n/a"} ${wifi.signal || ""} | ` +
             `GPS ${gps.has_fix} | ENV ${environment.ok === true ? "ok" : "n/a"} | ` +
-            `CPU ${fmt(status.cpu_temp_c, " °C")} | ` +
+            `CPU ${fmtNum(cpuUsage.used_percent, 1, "%")} | ` +
             `MEM ${fmt(memory.used_percent, "%")} | DISK ${fmt(storage.used_percent)}`;
 
         setText("gpsFix", gps.has_fix);
@@ -121,12 +121,7 @@ async function refreshStatus() {
         setText("signal", wifi.signal || "n/a");
 
         setText("cpuTemp", fmt(status.cpu_temp_c, " °C"));
-
-        if (load.one_min !== null && load.one_min !== undefined) {
-            setText("cpuLoad", `${load.one_min} / ${load.five_min} / ${load.fifteen_min}`);
-        } else {
-            setText("cpuLoad", "n/a");
-        }
+        setText("cpuUsage", `${fmtNum(cpuUsage.used_percent, 1, "%")} / ${cpuUsage.cores || 1} core${cpuUsage.cores === 1 ? "" : "s"}`);
 
         if (memory.used_mb !== null && memory.used_mb !== undefined) {
             setText(
