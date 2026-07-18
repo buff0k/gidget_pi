@@ -12,9 +12,9 @@ import bmi160 as BMI160
 
 
 IMU_FILE = Path("/opt/gidget/imu_state.json")
-POLL_SECONDS = 0.05
-WRITE_SECONDS = 0.10
-HISTORY_LIMIT = 120
+POLL_SECONDS = 0.20
+WRITE_SECONDS = 0.75
+HISTORY_LIMIT = 60
 STANDARD_GRAVITY = 9.80665
 
 
@@ -134,12 +134,30 @@ def history_point(index, sample):
     }
 
 
+def state_payload(history, latest, sample_index):
+    return {
+        "ok": True,
+        "error": None,
+        "sensor": "BMI160",
+        "address_hint": "0x68 or 0x69",
+        "sample_index": sample_index,
+        "poll_seconds": POLL_SECONDS,
+        "write_seconds": WRITE_SECONDS,
+        **latest,
+        "history": list(history),
+        "history_limit": HISTORY_LIMIT,
+    }
+
+
 def error_state(error, history):
     return {
         "ok": False,
         "error": str(error),
         "sensor": "BMI160",
         "address_hint": "0x68 or 0x69",
+        "sample_index": None,
+        "poll_seconds": POLL_SECONDS,
+        "write_seconds": WRITE_SECONDS,
         "acceleration": {},
         "gyro": {},
         "orientation": {},
@@ -166,15 +184,7 @@ def main():
 
                 now = time.monotonic()
                 if now - last_write >= WRITE_SECONDS:
-                    save_imu_state({
-                        "ok": True,
-                        "error": None,
-                        "sensor": "BMI160",
-                        "address_hint": "0x68 or 0x69",
-                        **latest,
-                        "history": list(history),
-                        "history_limit": HISTORY_LIMIT,
-                    })
+                    save_imu_state(state_payload(history, latest, sample_index))
                     last_write = now
 
                 time.sleep(POLL_SECONDS)
