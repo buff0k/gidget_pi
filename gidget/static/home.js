@@ -31,11 +31,16 @@ function formatUptime(seconds) {
 }
 
 function setText(id, value) {
-    document.getElementById(id).textContent = value;
+    const el = document.getElementById(id);
+    if (el) {
+        el.textContent = value;
+    }
 }
 
 function setFixClass(id, value) {
     const el = document.getElementById(id);
+    if (!el) return;
+
     el.classList.remove("good", "bad", "warn");
 
     if (value === true || value === "true") {
@@ -45,6 +50,30 @@ function setFixClass(id, value) {
     } else {
         el.classList.add("warn");
     }
+}
+
+function renderEnvironment(environment) {
+    const aht20 = environment.aht20 || {};
+    const bmp280 = environment.bmp280 || {};
+
+    if (environment.ok === true) {
+        setText("envStatus", "ok");
+        setFixClass("envStatus", true);
+    } else if (environment.error) {
+        setText("envStatus", environment.error);
+        setFixClass("envStatus", false);
+    } else {
+        setText("envStatus", "n/a");
+        setFixClass("envStatus", null);
+    }
+
+    setText("ahtTemp", fmtNum(aht20.temperature_c, 1, " °C"));
+    setText("humidity", fmtNum(aht20.humidity_percent, 1, " %"));
+    setText("bmpTemp", fmtNum(bmp280.temperature_c, 1, " °C"));
+    setText("pressure", fmtNum(bmp280.pressure_hpa, 1, " hPa"));
+    setText("envAltitude", fmtNum(bmp280.altitude_m, 1, " m"));
+    setText("bmpAddress", fmt(bmp280.address));
+    setText("envTimestamp", fmt(environment.timestamp));
 }
 
 async function refreshStatus() {
@@ -63,11 +92,13 @@ async function refreshStatus() {
         const load = status.load_average || {};
         const memory = status.memory || {};
         const storage = status.storage || {};
+        const environment = status.environment || {};
         const constellations = gps.constellations || [];
 
         document.getElementById("topStatus").textContent =
             `${status.hostname} | ${status.ip} | ${wifi.ssid || "n/a"} ${wifi.signal || ""} | ` +
-            `GPS ${gps.has_fix} | CPU ${fmt(status.cpu_temp_c, " °C")} | ` +
+            `GPS ${gps.has_fix} | ENV ${environment.ok === true ? "ok" : "n/a"} | ` +
+            `CPU ${fmt(status.cpu_temp_c, " °C")} | ` +
             `MEM ${fmt(memory.used_percent, "%")} | DISK ${fmt(storage.used_percent)}`;
 
         setText("gpsFix", gps.has_fix);
@@ -81,6 +112,8 @@ async function refreshStatus() {
         setText("gpsCourse", fmt(gps.course_deg, "°"));
         setText("gpsAlt", fmt(gps.altitude_m, " m"));
         setText("gpsTime", fmt(gps.timestamp));
+
+        renderEnvironment(environment);
 
         setText("hostname", status.hostname);
         setText("ip", status.ip);
