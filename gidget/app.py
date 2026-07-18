@@ -24,6 +24,7 @@ PAGE_MODULES = [
     "pages.history",
     "pages.gps_telemetry",
     "pages.lidar",
+    "pages.imu",
     "pages.config_page",
     "pages.files",
     "pages.users",
@@ -38,7 +39,6 @@ def create_app():
         template_folder="/opt/gidget/templates",
         static_folder="/opt/gidget/static",
     )
-
     app.secret_key = secrets.token_hex(32)
 
     ensure_users_file()
