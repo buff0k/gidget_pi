@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "gidget-pi"
 version = "0.1.0"
-description = "Gidget Raspberry Pi robot dashboard, GPS logger, OLED status display, environmental monitor, LIDAR monitor, and WiFi management UI"
+description = "Gidget Raspberry Pi robot dashboard, GPS logger, OLED status display, environmental monitor, LIDAR monitor, IMU monitor, and WiFi management UI"
 requires-python = ">=3.11"
 dependencies = [
     "Flask>=3.0",
@@ -18,5 +18,6 @@ dependencies = [
     "adafruit-circuitpython-ahtx0>=1.0",
     "adafruit-circuitpython-bmp280>=3.3",
     "adafruit-circuitpython-vl53l0x>=3.6",
-    "adafruit-circuitpython-vl53l1x>=1.2"
+    "adafruit-circuitpython-vl53l1x>=1.2",
+    "circuitpython-bmi160>=0.2.9"
 ]
