@@ -4,6 +4,7 @@ __pycache__/
 gidget/config/users.json
 gidget/status_state.json
 gidget/environment_state.json
+gidget/lidar_state.json
 gidget/data/tracks/*.jsonl
 *.log
 *.bak
