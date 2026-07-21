@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import json
+import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -9,7 +10,7 @@ import serial
 import pynmea2
 
 
-SERIAL_PORT = "/dev/serial0"
+SERIAL_PORT = os.environ.get("GIDGET_GPS_SERIAL_PORT", "/dev/ttyAMA0")
 BAUDRATE = 9600
 
 STATE_FILE = Path("/opt/gidget/status_state.json")
