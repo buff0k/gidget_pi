@@ -14,8 +14,8 @@ except Exception:
     Picamera2 = None
 
 
-STATE_FILE = Path("/opt/gidget/camera_state.json")
 FRAME_DIR = Path("/dev/shm/gidget")
+STATE_FILE = FRAME_DIR / "camera_state.json"
 FRAME_FILE = FRAME_DIR / "camera_frame.jpg"
 
 RESOLUTION = (1280, 720)

@@ -7,7 +7,7 @@ from flask import Blueprint, Response, jsonify, render_template
 from auth import login_required
 
 
-CAMERA_STATE_FILE = Path("/opt/gidget/camera_state.json")
+CAMERA_STATE_FILE = Path("/dev/shm/gidget/camera_state.json")
 FRAME_FILE = Path("/dev/shm/gidget/camera_frame.jpg")
 STREAM_POLL_SECONDS = 0.05
 

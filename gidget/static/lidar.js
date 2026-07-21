@@ -155,5 +155,5 @@ async function refreshLidar() {
 }
 
 refreshLidar();
-setInterval(refreshLidar, 1000);
+setInterval(refreshLidar, 300);
 window.addEventListener("resize", () => refreshLidar());

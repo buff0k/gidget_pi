@@ -4,6 +4,7 @@ set -Eeuo pipefail
 APP_USER="gidget"
 APP_GROUP="gidget"
 APP_DIR="/opt/gidget"
+SHM_DIR="/dev/shm/gidget"
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENV_DIR="${APP_DIR}/.venv"
 SUDOERS_FILE="/etc/sudoers.d/gidget"
@@ -156,11 +157,6 @@ sync_application_files() {
     rsync -a --delete \
         --exclude '.venv/' \
         --exclude 'config/users.json' \
-        --exclude 'status_state.json' \
-        --exclude 'environment_state.json' \
-        --exclude 'lidar_state.json' \
-        --exclude 'imu_state.json' \
-        --exclude 'camera_state.json' \
         --exclude 'data/tracks/*.jsonl' \
         "${REPO_DIR}/gidget/" "${APP_DIR}/"
 
@@ -170,25 +166,13 @@ sync_application_files() {
 create_default_runtime_files() {
     log "Creating default runtime config/state where missing"
 
-    if [ ! -f "${APP_DIR}/status_state.json" ]; then
-        printf '{}\n' > "${APP_DIR}/status_state.json"
-    fi
-
-    if [ ! -f "${APP_DIR}/environment_state.json" ]; then
-        printf '{}\n' > "${APP_DIR}/environment_state.json"
-    fi
-
-    if [ ! -f "${APP_DIR}/lidar_state.json" ]; then
-        printf '{}\n' > "${APP_DIR}/lidar_state.json"
-    fi
-
-    if [ ! -f "${APP_DIR}/imu_state.json" ]; then
-        printf '{}\n' > "${APP_DIR}/imu_state.json"
-    fi
-
-    if [ ! -f "${APP_DIR}/camera_state.json" ]; then
-        printf '{}\n' > "${APP_DIR}/camera_state.json"
-    fi
+    # Live sensor telemetry (GPS/LIDAR/IMU/environment/camera state) lives on
+    # tmpfs, not the SD card, to avoid wearing out the card with high-frequency
+    # rewrites. /dev/shm is already tmpfs by default; this just makes sure the
+    # gidget user owns the subdirectory before any reader service starts.
+    mkdir -p "${SHM_DIR}"
+    chown "${APP_USER}:${APP_GROUP}" "${SHM_DIR}"
+    chmod 0755 "${SHM_DIR}"
 
     if [ ! -f "${APP_DIR}/config/users.json" ]; then
         cd "${APP_DIR}"
@@ -245,12 +229,10 @@ fix_permissions() {
 
     chmod 0750 "${APP_DIR}/config"
     chmod 0640 "${APP_DIR}/config/users.json" 2>/dev/null || true
-    chmod 0644 "${APP_DIR}/status_state.json" 2>/dev/null || true
-    chmod 0644 "${APP_DIR}/environment_state.json" 2>/dev/null || true
-    chmod 0644 "${APP_DIR}/lidar_state.json" 2>/dev/null || true
-    chmod 0644 "${APP_DIR}/imu_state.json" 2>/dev/null || true
-    chmod 0644 "${APP_DIR}/camera_state.json" 2>/dev/null || true
     chmod 0755 "${APP_DIR}/data" "${APP_DIR}/data/tracks" 2>/dev/null || true
+
+    chown "${APP_USER}:${APP_GROUP}" "${SHM_DIR}" 2>/dev/null || true
+    chmod 0755 "${SHM_DIR}" 2>/dev/null || true
 }
 
 enable_and_start_services() {

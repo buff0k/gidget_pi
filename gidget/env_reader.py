@@ -11,7 +11,8 @@ import adafruit_ahtx0
 import adafruit_bmp280
 
 
-ENV_FILE = Path("/opt/gidget/environment_state.json")
+SHM_DIR = Path("/dev/shm/gidget")
+ENV_FILE = SHM_DIR / "environment_state.json"
 POLL_SECONDS = 5
 SEA_LEVEL_PRESSURE_HPA = 1013.25
 BMP280_ADDRESSES = (0x76, 0x77)
@@ -22,6 +23,7 @@ def utc_now_iso():
 
 
 def save_environment(data):
+    SHM_DIR.mkdir(parents=True, exist_ok=True)
     data["timestamp"] = utc_now_iso()
 
     temp_file = ENV_FILE.with_suffix(".tmp")

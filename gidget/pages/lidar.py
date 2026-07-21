@@ -6,7 +6,7 @@ from flask import Blueprint, jsonify, render_template
 from auth import login_required
 
 
-LIDAR_FILE = Path("/opt/gidget/lidar_state.json")
+LIDAR_FILE = Path("/dev/shm/gidget/lidar_state.json")
 
 blueprint = Blueprint("lidar", __name__, url_prefix="/lidar")
 

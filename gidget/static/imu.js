@@ -182,4 +182,4 @@ async function refreshImu() {
 }
 
 refreshImu();
-setInterval(refreshImu, 1000);
+setInterval(refreshImu, 300);

@@ -20,9 +20,10 @@ except Exception:
     adafruit_vl53l0x = None
 
 
-LIDAR_FILE = Path("/opt/gidget/lidar_state.json")
+SHM_DIR = Path("/dev/shm/gidget")
+LIDAR_FILE = SHM_DIR / "lidar_state.json"
 POLL_SECONDS = 0.10
-WRITE_SECONDS = 0.50
+WRITE_SECONDS = 0.10
 HISTORY_LIMIT = 60
 I2C_ADDRESS = 0x29
 MAX_DISPLAY_MM = 4000
@@ -37,6 +38,7 @@ def utc_now_iso():
 
 
 def save_lidar_state(data):
+    SHM_DIR.mkdir(parents=True, exist_ok=True)
     data["timestamp"] = utc_now_iso()
     temp_file = LIDAR_FILE.with_suffix(".tmp")
     temp_file.write_text(json.dumps(data, separators=(",", ":")))

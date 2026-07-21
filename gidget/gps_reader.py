@@ -13,7 +13,8 @@ import pynmea2
 SERIAL_PORT = os.environ.get("GIDGET_GPS_SERIAL_PORT", "/dev/ttyAMA0")
 BAUDRATE = 9600
 
-STATE_FILE = Path("/opt/gidget/status_state.json")
+SHM_DIR = Path("/dev/shm/gidget")
+STATE_FILE = SHM_DIR / "status_state.json"
 TRACK_DIR = Path("/opt/gidget/data/tracks")
 
 LOG_INTERVAL_SECONDS = 1
@@ -56,8 +57,9 @@ def load_state():
 
 
 def save_state(state):
+    SHM_DIR.mkdir(parents=True, exist_ok=True)
     temp_file = STATE_FILE.with_suffix(".tmp")
-    temp_file.write_text(json.dumps(state, indent=2))
+    temp_file.write_text(json.dumps(state, separators=(",", ":")))
     temp_file.replace(STATE_FILE)
 
 

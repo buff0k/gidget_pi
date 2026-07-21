@@ -11,9 +11,10 @@ import board
 import bmi160 as BMI160
 
 
-IMU_FILE = Path("/opt/gidget/imu_state.json")
+SHM_DIR = Path("/dev/shm/gidget")
+IMU_FILE = SHM_DIR / "imu_state.json"
 POLL_SECONDS = 0.20
-WRITE_SECONDS = 0.75
+WRITE_SECONDS = 0.20
 HISTORY_LIMIT = 60
 STANDARD_GRAVITY = 9.80665
 
@@ -36,6 +37,7 @@ def round_or_none(value, decimals=2):
 
 
 def save_imu_state(data):
+    SHM_DIR.mkdir(parents=True, exist_ok=True)
     data["timestamp"] = utc_now_iso()
     temp_file = IMU_FILE.with_suffix(".tmp")
     temp_file.write_text(json.dumps(data, separators=(",", ":")))

@@ -1,193 +1,118 @@
-const canvas =
-    document.getElementById(
-        "cameraOverlay"
-    );
-
-const image =
-    document.getElementById(
-        "cameraFeed"
-    );
+const canvas = document.getElementById("cameraOverlay");
+const image = document.getElementById("cameraFeed");
+const ctx = canvas.getContext("2d");
 
 
-const ctx =
-    canvas.getContext("2d");
+function resizeCanvas() {
+    // Use the rendered box size (not naturalWidth/Height) so the canvas
+    // coordinate space matches the CSS pixels we draw text at.
+    const width = image.clientWidth;
+    const height = image.clientHeight;
 
-
-function resizeCanvas()
-{
-    canvas.width =
-        image.clientWidth;
-
-    canvas.height =
-        image.clientHeight;
+    if (width && height && (canvas.width !== width || canvas.height !== height)) {
+        canvas.width = width;
+        canvas.height = height;
+    }
 }
 
 
-image.onload = resizeCanvas;
+// MJPEG (multipart/x-mixed-replace) streams don't reliably fire `load`
+// per frame across browsers, so don't rely on image.onload alone. Poll
+// the rendered size on an interval as well - cheap, and guarantees the
+// canvas tracks the image even before the first frame arrives.
+image.addEventListener("load", resizeCanvas);
+window.addEventListener("resize", resizeCanvas);
+setInterval(resizeCanvas, 500);
+resizeCanvas();
 
-window.onresize =
-    resizeCanvas;
 
-
-async function loadState()
-{
-
-    const response =
-        await fetch(
-            "/camera/api/state"
-        );
-
-    return await response.json();
-
+async function fetchJson(url) {
+    try {
+        const res = await fetch(url, { cache: "no-store" });
+        if (!res.ok) return {};
+        return await res.json();
+    } catch (e) {
+        return {};
+    }
 }
 
 
-async function loadSensors()
-{
-
-    let lidar = {};
-    let imu = {};
-    let env = {};
-
-
-    try {
-
-        lidar =
-            await (
-                await fetch(
-                    "/lidar/api/state"
-                )
-            ).json();
-
-    } catch(e){}
-
-
-    try {
-
-        imu =
-            await (
-                await fetch(
-                    "/imu/api/state"
-                )
-            ).json();
-
-    } catch(e){}
-
-
-    try {
-
-        env =
-            await (
-                await fetch(
-                    "/api/status"
-                )
-            ).json();
-
-    } catch(e){}
-
+async function loadSensors() {
+    const [lidar, imu, status] = await Promise.all([
+        fetchJson("/lidar/api/state"),
+        fetchJson("/imu/api/state"),
+        fetchJson("/api/status"),
+    ]);
 
     return {
         lidar,
         imu,
-        env
+        env: status.environment || {},
+        gps: status.gps || {},
     };
-
 }
 
 
-async function drawOverlay()
-{
-
-    ctx.clearRect(
-        0,
-        0,
-        canvas.width,
-        canvas.height
-    );
-
-
-    const data =
-        await loadSensors();
-
-
-    ctx.font =
-        "22px monospace";
-
-
-    ctx.fillStyle =
-        "white";
-
-
-    let y = 35;
-
-
-    if (
-        document.getElementById(
-            "lidarToggle"
-        ).checked
-    )
-    {
-
-        ctx.fillText(
-            "LIDAR: " +
-            (
-                data.lidar.distance ||
-                "n/a"
-            ),
-            20,
-            y
-        );
-
-        y += 30;
-
-    }
-
-
-    if (
-        document.getElementById(
-            "imuToggle"
-        ).checked
-    )
-    {
-
-        ctx.fillText(
-            "IMU: " +
-            (
-                data.imu.pitch ||
-                "n/a"
-            ),
-            20,
-            y
-        );
-
-        y += 30;
-
-    }
-
-
-    if (
-        document.getElementById(
-            "environmentToggle"
-        ).checked
-    )
-    {
-
-        ctx.fillText(
-            "Climate: " +
-            (
-                data.env.temperature ||
-                "n/a"
-            ),
-            20,
-            y
-        );
-
-    }
-
+function fmt(value, decimals, unit) {
+    if (value === null || value === undefined) return "n/a";
+    const num = Number(value);
+    if (Number.isNaN(num)) return "n/a";
+    return num.toFixed(decimals) + (unit || "");
 }
 
 
-setInterval(
-    drawOverlay,
-    1000
-);
+async function drawOverlay() {
+    const data = await loadSensors();
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    ctx.font = "20px monospace";
+    ctx.textBaseline = "top";
+    ctx.shadowColor = "rgba(0,0,0,0.85)";
+    ctx.shadowBlur = 4;
+    ctx.fillStyle = "#80ff9f";
+
+    let y = 16;
+    const lineHeight = 26;
+
+    function line(text) {
+        ctx.fillText(text, 16, y);
+        y += lineHeight;
+    }
+
+    if (document.getElementById("lidarToggle").checked) {
+        line("RANGE: " + fmt(data.lidar.distance_cm, 1, " cm"));
+    }
+
+    if (document.getElementById("imuToggle").checked) {
+        const orientation = data.imu.orientation || {};
+        line(
+            "PITCH: " + fmt(orientation.pitch_deg, 1, "deg") +
+            "  ROLL: " + fmt(orientation.roll_deg, 1, "deg")
+        );
+    }
+
+    if (document.getElementById("environmentToggle").checked) {
+        const aht20 = data.env.aht20 || {};
+        line(
+            "TEMP: " + fmt(aht20.temperature_c, 1, "C") +
+            "  HUM: " + fmt(aht20.humidity_percent, 0, "%")
+        );
+    }
+
+    if (document.getElementById("gpsToggle").checked) {
+        const gps = data.gps || {};
+        if (gps.has_fix) {
+            line(
+                "GPS: " + fmt(gps.lat, 5) + ", " + fmt(gps.lon, 5) +
+                "  " + fmt(gps.speed_kmh, 1, " km/h")
+            );
+        } else {
+            line("GPS: no fix");
+        }
+    }
+}
+
+
+setInterval(drawOverlay, 500);
+drawOverlay();

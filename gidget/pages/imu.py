@@ -6,7 +6,7 @@ from flask import Blueprint, jsonify, render_template
 from auth import login_required
 
 
-IMU_FILE = Path("/opt/gidget/imu_state.json")
+IMU_FILE = Path("/dev/shm/gidget/imu_state.json")
 
 blueprint = Blueprint("imu", __name__, url_prefix="/imu")
 

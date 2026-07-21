@@ -7,10 +7,11 @@ from pathlib import Path
 
 
 BASE_DIR = Path("/opt/gidget")
-STATE_FILE = BASE_DIR / "status_state.json"
-ENVIRONMENT_FILE = BASE_DIR / "environment_state.json"
-LIDAR_FILE = BASE_DIR / "lidar_state.json"
-IMU_FILE = BASE_DIR / "imu_state.json"
+SHM_DIR = Path("/dev/shm/gidget")
+STATE_FILE = SHM_DIR / "status_state.json"
+ENVIRONMENT_FILE = SHM_DIR / "environment_state.json"
+LIDAR_FILE = SHM_DIR / "lidar_state.json"
+IMU_FILE = SHM_DIR / "imu_state.json"
 TRACK_DIR = BASE_DIR / "data" / "tracks"
 CPU_SNAPSHOT_FILE = Path("/tmp/gidget_cpu_snapshot.json")
 

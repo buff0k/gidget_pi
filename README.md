@@ -261,15 +261,21 @@ Runtime files are generated on the Pi and should not be committed:
 
 ```text
 gidget/config/users.json
-gidget/status_state.json
-gidget/environment_state.json
-gidget/lidar_state.json
-gidget/imu_state.json
-gidget/camera_state.json
 gidget/data/tracks/*.jsonl
 ```
 
-The camera service also writes the latest JPEG frame to `/dev/shm/gidget/camera_frame.jpg` (tmpfs, RAM-backed) rather than the SD card, so it never appears in the repo or in `/opt/gidget`.
+Live sensor telemetry (GPS status, LIDAR, IMU, environment, and camera state) is written to `/dev/shm/gidget/` (tmpfs, RAM-backed) rather than `/opt/gidget` on the SD card, so none of it appears in the repo or on disk:
+
+```text
+/dev/shm/gidget/status_state.json
+/dev/shm/gidget/environment_state.json
+/dev/shm/gidget/lidar_state.json
+/dev/shm/gidget/imu_state.json
+/dev/shm/gidget/camera_state.json
+/dev/shm/gidget/camera_frame.jpg
+```
+
+This is deliberate: these files are rewritten multiple times per second (GPS state in particular used to be rewritten on nearly every NMEA sentence, several times a second) and have no need to survive a reboot, so keeping them off the SD card avoids wearing out the card. Only GPS track history (`gidget/data/tracks/*.jsonl`) persists to the SD card, since that's data you actually want to keep across reboots.
 
 ## Raspberry Pi prerequisites
 
@@ -403,18 +409,23 @@ journalctl -u gidget-oled.service -n 100 --no-pager
 
 ## Performance notes
 
-The sensor services intentionally write lightweight JSON state files at human-dashboard rates rather than high-frequency robotics rates. This dates back to the Pi Zero build; the Pi 5 has plenty of headroom for these rates, so they remain conservative by choice rather than necessity.
+Sensor services write their JSON state files to `/dev/shm/gidget/` (tmpfs, RAM-backed) rather than `/opt/gidget` on the SD card. Because RAM writes carry no wear cost, write cadence is set to match poll cadence for LIDAR and IMU rather than being throttled behind it, which keeps dashboard/overlay latency close to the sensor's own sampling rate.
 
-Current conservative telemetry rates:
+Current telemetry rates:
 
 | Service | Poll interval | JSON write interval | History length |
 |---|---:|---:|---:|
-| LIDAR | 0.10s | 0.50s | 60 samples |
-| IMU | 0.20s | 0.75s | 60 samples |
+| LIDAR | 0.10s | 0.10s | 60 samples |
+| IMU | 0.20s | 0.20s | 60 samples |
 | Environment | 5.00s | every sample | latest values |
+| GPS | per NMEA sentence | per NMEA sentence | latest values (track history separately, see below) |
 | Camera | 0.10s (~10 fps) | frame: every capture; state: 2.00s | latest frame only |
 
-The camera writes each JPEG frame to `/dev/shm` (tmpfs) rather than `/opt/gidget` on the SD card, so continuous frame writes don't cause SD card wear. Frame rate/resolution/JPEG quality are set in `camera_reader.py` (`RESOLUTION`, `CAPTURE_SECONDS`, `JPEG_QUALITY`) — raise capture rate or resolution only after confirming CPU headroom, since encoding cost scales with both.
+GPS is the busiest writer by far — a typical module emits several NMEA sentences (RMC, GGA, GSA, GSV) per second, each triggering a state rewrite. This is fine on tmpfs but would have been a serious SD card wear source if left on disk, which is why it moved along with the others.
+
+GPS **track history** (`gidget/data/tracks/*.jsonl`) is the one telemetry write that intentionally stays on the SD card, since it's meant to persist across reboots. It's throttled independently to one append per second while the vehicle has a fix and is moving, which keeps it lightweight regardless of how often the tmpfs state above is rewritten.
+
+The camera writes each JPEG frame to `/dev/shm` (tmpfs) as well, so continuous frame writes don't cause SD card wear. Frame rate/resolution/JPEG quality are set in `camera_reader.py` (`RESOLUTION`, `CAPTURE_SECONDS`, `JPEG_QUALITY`) — raise capture rate or resolution only after confirming CPU headroom, since encoding cost scales with both.
 
 If CPU is pinned, identify the process first:
 
@@ -431,7 +442,7 @@ ps -eo pid,comm,pcpu,pmem,args --sort=-pcpu | head -20
 sudo systemctl start gidget-imu.service
 ```
 
-For true high-rate telemetry, the likely next architecture step is a single in-memory telemetry service or a message bus rather than several independent services writing full JSON state files.
+The SD-card-wear concern that used to motivate throttling write cadence is now addressed by keeping all live telemetry state on tmpfs (see above). If even tighter latency is needed later (sub-100ms robotics-rate control loops rather than dashboard/overlay display), the next architecture step would be a shared-memory struct or a message bus between services, rather than per-service JSON files — but for the current dashboard/overlay use case, tmpfs JSON at poll-matched write rates is sufficient.
 
 ## Development notes
 

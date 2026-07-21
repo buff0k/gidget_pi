@@ -24,7 +24,7 @@ FRAME_SECONDS = 0.25
 SCREEN_SECONDS = 20
 WASH_STEPS = 8
 
-STATE_FILE = Path("/opt/gidget/status_state.json")
+STATE_FILE = Path("/dev/shm/gidget/status_state.json")
 
 display = None
 
