@@ -3,7 +3,7 @@ from pathlib import Path
 import mimetypes
 
 
-from auth import login_required
+from auth import admin_required
 
 
 blueprint = Blueprint("files", __name__, url_prefix="/files")
@@ -86,13 +86,13 @@ def file_type_for_name(path):
 
 
 @blueprint.route("/")
-@login_required
+@admin_required
 def index():
     return render_template("files.html")
 
 
 @blueprint.route("/api/list")
-@login_required
+@admin_required
 def api_list():
     requested_path = request.args.get("path", "")
     path = safe_resolve(requested_path)
@@ -150,7 +150,7 @@ def api_list():
 
 
 @blueprint.route("/api/view")
-@login_required
+@admin_required
 def api_view():
     requested_path = request.args.get("path", "")
     path = safe_resolve(requested_path)
@@ -203,7 +203,7 @@ def api_view():
 
 
 @blueprint.route("/download")
-@login_required
+@admin_required
 def download():
     requested_path = request.args.get("path", "")
     path = safe_resolve(requested_path)

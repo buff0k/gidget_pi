@@ -32,6 +32,28 @@ PAGE_MODULES = [
 ]
 
 
+def load_or_create_secret_key():
+    """
+    A secret key regenerated on every process start invalidates every
+    session on every restart (crash, update.sh, reboot). Persist one
+    instead, alongside users.json, with the same tight permissions.
+    """
+    from auth import CONFIG_DIR
+
+    key_file = CONFIG_DIR / "secret_key"
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+
+    if key_file.exists():
+        existing = key_file.read_text().strip()
+        if existing:
+            return existing
+
+    key = secrets.token_hex(32)
+    key_file.write_text(key)
+    key_file.chmod(0o600)
+    return key
+
+
 def create_app():
     from flask import Flask
 
@@ -40,7 +62,7 @@ def create_app():
         template_folder="/opt/gidget/templates",
         static_folder="/opt/gidget/static",
     )
-    app.secret_key = secrets.token_hex(32)
+    app.secret_key = load_or_create_secret_key()
 
     ensure_users_file()
 
@@ -64,7 +86,7 @@ def create_app():
 
         if user:
             for page in pages:
-                if page.get("id") == "config" and user.get("role") != "admin":
+                if page.get("id") in ("config", "files") and user.get("role") != "admin":
                     continue
                 visible_pages.append(page)
 
@@ -154,4 +176,10 @@ app = create_app()
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8080)
+    from waitress import serve
+
+    # threads=8: the MJPEG camera stream (/camera/stream.mjpg) holds a
+    # connection open for as long as it's being viewed. The Flask dev
+    # server is single-threaded and would block every other request -
+    # login, sensor polling, everything - behind that one open stream.
+    serve(app, host="0.0.0.0", port=8080, threads=8)

@@ -10,24 +10,26 @@
 </head>
 <body>
 <header>
-    <h1>Gidget Robot Dashboard</h1>
+    <div class="header-top">
+        <h1>Gidget Robot Dashboard</h1>
 
-    {% if current_user %}
-    <nav>
-        {% for page in pages %}
-            <a class="nav-link {% if active_page == page.id %}active{% endif %}" href="{{ page.url }}">
-                {{ page.label }}
-            </a>
-        {% endfor %}
+        {% if current_user %}
+        <nav>
+            {% for page in pages %}
+                <a class="nav-link {% if active_page == page.id %}active{% endif %}" href="{{ page.url }}">
+                    {{ page.label }}
+                </a>
+            {% endfor %}
 
-        <a class="nav-link" href="/auth/logout">Logout {{ current_user.username }}</a>
-    </nav>
+            <a class="nav-link" href="/auth/logout">Logout {{ current_user.username }}</a>
+        </nav>
+        {% endif %}
+    </div>
 
-    {% if current_user.must_change_password %}
+    {% if current_user and current_user.must_change_password %}
         <div class="warning">
             Default or temporary password in use. Please change it on the Users page.
         </div>
-    {% endif %}
     {% endif %}
 
     <div id="topStatus" class="status-line">Loading...</div>
