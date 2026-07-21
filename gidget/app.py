@@ -25,6 +25,7 @@ PAGE_MODULES = [
     "pages.gps_telemetry",
     "pages.lidar",
     "pages.imu",
+    "pages.camera",
     "pages.config_page",
     "pages.files",
     "pages.users",

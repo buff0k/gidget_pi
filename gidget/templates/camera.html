@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+
+{% set active_page = "camera" %}
+
+{% block content %}
+
+<section class="page-wrap">
+
+<div class="card">
+
+<h2>Camera</h2>
+
+<div class="camera-container">
+
+<img
+    id="cameraFeed"
+    src="/camera/stream.mjpg"
+/>
+
+<canvas
+    id="cameraOverlay">
+</canvas>
+
+</div>
+
+</div>
+
+
+<div class="card">
+
+<h2>Overlay Controls</h2>
+
+<label>
+<input id="lidarToggle" type="checkbox" checked>
+LIDAR
+</label>
+
+<label>
+<input id="imuToggle" type="checkbox" checked>
+6 Axis IMU
+</label>
+
+<label>
+<input id="environmentToggle" type="checkbox" checked>
+Climate
+</label>
+
+</div>
+
+
+<div class="card">
+
+<pre id="cameraState">
+Waiting...
+</pre>
+
+</div>
+
+
+</section>
+
+{% endblock %}
+
+
+{% block scripts %}
+
+<script src="/static/camera.js"></script>
+
+{% endblock %}

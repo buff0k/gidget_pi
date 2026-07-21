@@ -8,7 +8,7 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENV_DIR="${APP_DIR}/.venv"
 SUDOERS_FILE="/etc/sudoers.d/gidget"
 SYSTEMD_DIR="/etc/systemd/system"
-SERVICES=(gidget-gps.service gidget-env.service gidget-lidar.service gidget-imu.service gidget-oled.service gidget-web.service)
+SERVICES=(gidget-gps.service gidget-env.service gidget-lidar.service gidget-imu.service gidget-camera.service gidget-oled.service gidget-web.service)
 
 log() { printf '\n[update] %s\n' "$*"; }
 fail() { printf '\n[update] ERROR: %s\n' "$*" >&2; exit 1; }
@@ -76,7 +76,7 @@ ensure_system_user() {
         useradd --system --home "${APP_DIR}" --shell /usr/sbin/nologin --create-home "${APP_USER}"
     fi
 
-    for group in i2c dialout gpio; do
+    for group in i2c dialout gpio video render; do
         if getent group "$group" >/dev/null 2>&1; then
             usermod -aG "$group" "${APP_USER}"
         fi
@@ -137,6 +137,7 @@ sync_application_files() {
         --exclude 'environment_state.json' \
         --exclude 'lidar_state.json' \
         --exclude 'imu_state.json' \
+        --exclude 'camera_state.json' \
         --exclude 'data/tracks/*.jsonl' \
         "${REPO_DIR}/gidget/" "${APP_DIR}/"
 
@@ -162,6 +163,10 @@ ensure_runtime_files() {
         printf '{}\n' > "${APP_DIR}/imu_state.json"
     fi
 
+    if [ ! -f "${APP_DIR}/camera_state.json" ]; then
+        printf '{}\n' > "${APP_DIR}/camera_state.json"
+    fi
+
     if [ ! -f "${APP_DIR}/config/users.json" ]; then
         cd "${APP_DIR}"
         "${VENV_DIR}/bin/python" - <<'PY'
@@ -180,6 +185,7 @@ install_systemd_services() {
     install -m 0644 "${REPO_DIR}/systemd/gidget-env.service" "${SYSTEMD_DIR}/gidget-env.service"
     install -m 0644 "${REPO_DIR}/systemd/gidget-lidar.service" "${SYSTEMD_DIR}/gidget-lidar.service"
     install -m 0644 "${REPO_DIR}/systemd/gidget-imu.service" "${SYSTEMD_DIR}/gidget-imu.service"
+    install -m 0644 "${REPO_DIR}/systemd/gidget-camera.service" "${SYSTEMD_DIR}/gidget-camera.service"
     install -m 0644 "${REPO_DIR}/systemd/gidget-oled.service" "${SYSTEMD_DIR}/gidget-oled.service"
     install -m 0644 "${REPO_DIR}/systemd/gidget-web.service" "${SYSTEMD_DIR}/gidget-web.service"
 }
@@ -192,6 +198,7 @@ gidget ALL=(root) NOPASSWD: /usr/bin/nmcli
 gidget ALL=(root) NOPASSWD: /usr/bin/systemctl restart gidget-env.service
 gidget ALL=(root) NOPASSWD: /usr/bin/systemctl restart gidget-lidar.service
 gidget ALL=(root) NOPASSWD: /usr/bin/systemctl restart gidget-imu.service
+gidget ALL=(root) NOPASSWD: /usr/bin/systemctl restart gidget-camera.service
 gidget ALL=(root) NOPASSWD: /usr/bin/systemctl restart gidget-oled.service
 gidget ALL=(root) NOPASSWD: /usr/bin/systemctl restart gidget-gps.service
 gidget ALL=(root) NOPASSWD: /usr/bin/systemctl restart gidget-web.service
@@ -219,6 +226,7 @@ fix_permissions() {
     chmod 0644 "${APP_DIR}/environment_state.json" 2>/dev/null || true
     chmod 0644 "${APP_DIR}/lidar_state.json" 2>/dev/null || true
     chmod 0644 "${APP_DIR}/imu_state.json" 2>/dev/null || true
+    chmod 0644 "${APP_DIR}/camera_state.json" 2>/dev/null || true
     chmod 0755 "${APP_DIR}/data" "${APP_DIR}/data/tracks" 2>/dev/null || true
 }
 

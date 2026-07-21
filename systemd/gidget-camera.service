@@ -1,0 +1,15 @@
+[Unit]
+Description=Gidget Camera Reader
+After=multi-user.target
+
+[Service]
+Type=simple
+User=gidget
+Group=gidget
+WorkingDirectory=/opt/gidget
+ExecStart=/opt/gidget/.venv/bin/python /opt/gidget/camera_reader.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
