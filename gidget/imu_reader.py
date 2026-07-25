@@ -18,6 +18,18 @@ WRITE_SECONDS = 0.20
 HISTORY_LIMIT = 60
 STANDARD_GRAVITY = 9.80665
 
+# Physical mounting correction for the BMI160 on the hexapod top plate.
+# Confirmed on hardware: pitch and roll come out swapped (tilting nose
+# up/down moved "roll" instead of "pitch"), signs were correct otherwise.
+SWAP_PITCH_ROLL = True
+INVERT_PITCH = False
+INVERT_ROLL = False
+
+# Accelerometer-only tilt is noisy sample-to-sample even when the robot is
+# perfectly still. Exponential smoothing kills that jitter; lower alpha =
+# smoother but slower to track real motion.
+TILT_SMOOTHING_ALPHA = 0.2
+
 
 class ImuUnavailable(RuntimeError):
     pass
@@ -73,9 +85,26 @@ def vector_magnitude(x, y, z):
         return None
 
 
+def apply_mount_correction(pitch, roll):
+    if pitch is None or roll is None:
+        return pitch, roll
+
+    if SWAP_PITCH_ROLL:
+        pitch, roll = roll, pitch
+
+    if INVERT_PITCH:
+        pitch = -pitch
+
+    if INVERT_ROLL:
+        roll = -roll
+
+    return pitch, roll
+
+
 def tilt_from_accel(ax, ay, az):
     """
-    Simple accelerometer-only pitch/roll estimate.
+    Simple accelerometer-only pitch/roll estimate, corrected for how the
+    BMI160 is physically mounted on the hexapod top plate.
 
     This is useful when mostly stationary. It is not a fused AHRS estimate and
     will be distorted by vehicle acceleration.
@@ -86,18 +115,22 @@ def tilt_from_accel(ax, ay, az):
         az = float(az)
         roll = math.degrees(math.atan2(ay, az))
         pitch = math.degrees(math.atan2(-ax, math.sqrt((ay * ay) + (az * az))))
-        return pitch, roll
+        return apply_mount_correction(pitch, roll)
     except Exception:
         return None, None
 
 
-def sample_imu(sensor):
-    ax, ay, az = sensor.acceleration
-    gx, gy, gz = sensor.gyro
+def smooth(previous, new, alpha):
+    if new is None:
+        return previous
+    if previous is None:
+        return new
+    return (alpha * new) + ((1 - alpha) * previous)
 
+
+def build_sample(ax, ay, az, gx, gy, gz, pitch, roll, temperature_c):
     acc_mag = vector_magnitude(ax, ay, az)
     gyro_mag = vector_magnitude(gx, gy, gz)
-    pitch, roll = tilt_from_accel(ax, ay, az)
 
     return {
         "acceleration": {
@@ -116,9 +149,9 @@ def sample_imu(sensor):
         "orientation": {
             "pitch_deg": round_or_none(pitch, 2),
             "roll_deg": round_or_none(roll, 2),
-            "source": "accelerometer_tilt",
+            "source": "accelerometer_tilt_smoothed",
         },
-        "temperature_c": round_or_none(getattr(sensor, "temperature", None), 2),
+        "temperature_c": round_or_none(temperature_c, 2),
     }
 
 
@@ -172,15 +205,27 @@ def error_state(error, history):
 def main():
     history = deque(maxlen=HISTORY_LIMIT)
     sample_index = 0
+    pitch_smooth = None
+    roll_smooth = None
 
     while True:
         try:
             sensor = init_imu()
             last_write = 0.0
-            latest = None
 
             while True:
-                latest = sample_imu(sensor)
+                ax, ay, az = sensor.acceleration
+                gx, gy, gz = sensor.gyro
+
+                raw_pitch, raw_roll = tilt_from_accel(ax, ay, az)
+                pitch_smooth = smooth(pitch_smooth, raw_pitch, TILT_SMOOTHING_ALPHA)
+                roll_smooth = smooth(roll_smooth, raw_roll, TILT_SMOOTHING_ALPHA)
+
+                latest = build_sample(
+                    ax, ay, az, gx, gy, gz,
+                    pitch_smooth, roll_smooth,
+                    getattr(sensor, "temperature", None),
+                )
                 sample_index += 1
                 history.append(history_point(sample_index, latest))
 
@@ -192,6 +237,8 @@ def main():
                 time.sleep(POLL_SECONDS)
 
         except Exception as e:
+            pitch_smooth = None
+            roll_smooth = None
             save_imu_state(error_state(e, history))
             time.sleep(5)
 

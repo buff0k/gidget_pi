@@ -21,10 +21,14 @@ HEIGHT = 64
 I2C_ADDRESS = 0x3C
 
 FRAME_SECONDS = 0.25
-SCREEN_SECONDS = 20
+SCREEN_SECONDS = 10
 WASH_STEPS = 8
 
-STATE_FILE = Path("/dev/shm/gidget/status_state.json")
+SHM_DIR = Path("/dev/shm/gidget")
+STATE_FILE = SHM_DIR / "status_state.json"
+ENV_FILE = SHM_DIR / "environment_state.json"
+IMU_FILE = SHM_DIR / "imu_state.json"
+UPDATE_FLAG_FILE = SHM_DIR / "update_in_progress"
 
 display = None
 
@@ -112,15 +116,22 @@ def get_uptime():
         return "n/a"
 
 
-def get_gps_state():
-    if not STATE_FILE.exists():
+def load_json_file(path):
+    if not path.exists():
         return {}
 
     try:
-        state = json.loads(STATE_FILE.read_text())
-        return state.get("gps", {})
+        return json.loads(path.read_text())
     except Exception:
         return {}
+
+
+def get_gps_state():
+    return load_json_file(STATE_FILE).get("gps", {})
+
+
+def is_update_in_progress():
+    return UPDATE_FLAG_FILE.exists()
 
 
 def text_width(draw, text, font):
@@ -239,6 +250,75 @@ def draw_gps_screen(font_small, font_bold, tick):
     return image
 
 
+def draw_climate_screen(font_small, font_bold, tick):
+    image, draw = base_frame(font_small, font_bold)
+
+    env = load_json_file(ENV_FILE)
+    aht20 = env.get("aht20", {})
+    bmp280 = env.get("bmp280", {})
+
+    draw.text((0, 16), "CLIMATE", font=font_bold, fill=255)
+
+    if env.get("ok"):
+        temp = aht20.get("temperature_c")
+        humidity = aht20.get("humidity_percent")
+        pressure = bmp280.get("pressure_hpa")
+        altitude = bmp280.get("altitude_m")
+
+        temp_text = "n/a" if temp is None else f"{float(temp):.1f}C"
+        humidity_text = "n/a" if humidity is None else f"{float(humidity):.0f}%"
+        pressure_text = "n/a" if pressure is None else f"{float(pressure):.0f}hPa"
+        altitude_text = "n/a" if altitude is None else f"{float(altitude):.0f}m"
+
+        draw.text((0, 30), f"Temp {temp_text}  Hum {humidity_text}", font=font_small, fill=255)
+        draw.text((0, 42), f"Pressure {pressure_text}", font=font_small, fill=255)
+        draw.text((0, 54), f"Altitude {altitude_text}", font=font_small, fill=255)
+    else:
+        draw.text((0, 30), "No sensor data", font=font_small, fill=255)
+
+    return image
+
+
+def draw_imu_screen(font_small, font_bold, tick):
+    image, draw = base_frame(font_small, font_bold)
+
+    imu = load_json_file(IMU_FILE)
+    orientation = imu.get("orientation", {})
+    accel = imu.get("acceleration", {})
+
+    draw.text((0, 16), "IMU", font=font_bold, fill=255)
+
+    if imu.get("ok"):
+        pitch = orientation.get("pitch_deg")
+        roll = orientation.get("roll_deg")
+        accel_g = accel.get("magnitude_g")
+
+        pitch_text = "n/a" if pitch is None else f"{float(pitch):.1f}"
+        roll_text = "n/a" if roll is None else f"{float(roll):.1f}"
+        accel_text = "n/a" if accel_g is None else f"{float(accel_g):.2f}g"
+
+        draw.text((0, 30), f"Pitch {pitch_text}  Roll {roll_text}", font=font_small, fill=255)
+        draw.text((0, 42), f"Accel {accel_text}", font=font_small, fill=255)
+        draw.text((0, 54), imu.get("sensor", "BMI160"), font=font_small, fill=255)
+    else:
+        draw.text((0, 30), "No sensor data", font=font_small, fill=255)
+
+    return image
+
+
+def draw_update_screen(font_small, font_bold, tick):
+    image, draw = base_frame(font_small, font_bold)
+
+    dots = "." * ((tick % 4) + 1)
+
+    draw.text((0, 16), "UPDATE", font=font_bold, fill=255)
+    draw.text((0, 30), "Applying update", font=font_small, fill=255)
+    draw.text((0, 42), f"Please wait{dots}", font=font_small, fill=255)
+    draw.text((0, 54), "Do not power off", font=font_small, fill=255)
+
+    return image
+
+
 def wash_transition(old_image, new_image):
     global display
 
@@ -276,9 +356,17 @@ def main():
     font_small = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 10)
     font_bold = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 11)
 
+    screens = [
+        draw_wifi_screen,
+        draw_gps_screen,
+        draw_climate_screen,
+        draw_imu_screen,
+    ]
+
     current_screen = 0
     last_switch = time.monotonic()
     tick = 0
+    was_updating = False
 
     image = draw_wifi_screen(font_small, font_bold, tick)
     display.image(image)
@@ -286,24 +374,24 @@ def main():
 
     while True:
         now = time.monotonic()
+        updating = is_update_in_progress()
 
-        if now - last_switch >= SCREEN_SECONDS:
-            old_image = image
-            current_screen = 1 - current_screen
+        if updating:
+            image = draw_update_screen(font_small, font_bold, tick)
+            display.image(image)
+            display.show()
             last_switch = now
+            was_updating = True
+        elif now - last_switch >= SCREEN_SECONDS or was_updating:
+            old_image = image
+            current_screen = 0 if was_updating else (current_screen + 1) % len(screens)
+            last_switch = now
+            was_updating = False
 
-            if current_screen == 0:
-                image = draw_wifi_screen(font_small, font_bold, tick)
-            else:
-                image = draw_gps_screen(font_small, font_bold, tick)
-
+            image = screens[current_screen](font_small, font_bold, tick)
             wash_transition(old_image, image)
         else:
-            if current_screen == 0:
-                image = draw_wifi_screen(font_small, font_bold, tick)
-            else:
-                image = draw_gps_screen(font_small, font_bold, tick)
-
+            image = screens[current_screen](font_small, font_bold, tick)
             display.image(image)
             display.show()
 

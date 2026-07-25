@@ -10,6 +10,7 @@ VENV_DIR="${APP_DIR}/.venv"
 SUDOERS_FILE="/etc/sudoers.d/gidget"
 SYSTEMD_DIR="/etc/systemd/system"
 SERVICES=(gidget-gps.service gidget-env.service gidget-lidar.service gidget-imu.service gidget-camera.service gidget-oled.service gidget-web.service)
+UPDATE_FLAG_FILE="${SHM_DIR}/update_in_progress"
 
 log() { printf '\n[update] %s\n' "$*"; }
 fail() { printf '\n[update] ERROR: %s\n' "$*" >&2; exit 1; }
@@ -18,6 +19,17 @@ require_root() {
     if [ "${EUID}" -ne 0 ]; then
         fail "Run this updater as root, for example: sudo bash ./update.sh"
     fi
+}
+
+mark_update_start() {
+    log "Flagging update in progress so the OLED shows 'Updating' instead of going dark"
+
+    mkdir -p "${SHM_DIR}"
+    printf '{"status":"updating"}\n' > "${UPDATE_FLAG_FILE}"
+
+    # No matter how this script exits (success, failure, or interrupt), clear
+    # the flag so the OLED doesn't get stuck on the update screen forever.
+    trap 'rm -f "${UPDATE_FLAG_FILE}" 2>/dev/null || true' EXIT
 }
 
 read_apt_dependencies() {
@@ -120,8 +132,11 @@ PY
 }
 
 stop_services() {
-    log "Stopping Gidget services"
+    log "Stopping Gidget services (leaving gidget-oled.service running to show update status)"
     for service in "${SERVICES[@]}"; do
+        if [ "$service" = "gidget-oled.service" ]; then
+            continue
+        fi
         systemctl stop "$service" 2>/dev/null || true
     done
 }
@@ -222,6 +237,7 @@ restart_services() {
 
 main() {
     require_root
+    mark_update_start
     maybe_reexec_after_git_pull "$@"
     install_apt_dependencies
     ensure_system_user
