@@ -248,6 +248,13 @@ update_hexapod_firmware() {
         return
     fi
 
+    # gidget-hexapod.service was just stopped, which now asks the board to
+    # reset itself cleanly on the way out (see hexapod_controller.py's
+    # shutdown handler). That reset + USB re-enumeration takes a moment -
+    # give it time before scanning for the device node, rather than
+    # possibly catching it mid-reboot.
+    sleep 2
+
     local port=""
     for candidate in /dev/gidget-servo2040 /dev/ttyACM0 /dev/ttyACM1; do
         if [ -e "$candidate" ]; then

@@ -159,6 +159,16 @@ def main():
 
             try:
                 payload = json.loads(line)
+
+                if payload.get("reset"):
+                    # Requested by hexapod_controller.py's graceful shutdown
+                    # handler - a real reset (equivalent to the physical
+                    # button) leaves the board in a clean state for
+                    # whatever connects next, rather than one that has to
+                    # be interrupted out of a running loop.
+                    import machine
+                    machine.reset()
+
                 channels = payload.get("ch")
                 if isinstance(channels, list):
                     apply_channels(channels)

@@ -256,6 +256,14 @@ update_hexapod_firmware() {
         return
     fi
 
+    # On a re-run of install.sh, gidget-hexapod.service may already be
+    # running. Stop it so it isn't holding the port, and so its shutdown
+    # handler gets a chance to reset the board cleanly first (see
+    # hexapod_controller.py) - a real reset leaves it in a far more
+    # reliable state for mpremote than interrupting it mid-loop.
+    systemctl stop gidget-hexapod.service 2>/dev/null || true
+    sleep 2
+
     local port=""
     for candidate in /dev/gidget-servo2040 /dev/ttyACM0 /dev/ttyACM1; do
         if [ -e "$candidate" ]; then

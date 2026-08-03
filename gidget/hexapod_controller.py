@@ -10,6 +10,7 @@ one-owner-per-device pattern used by every other reader in this repo.
 
 import json
 import os
+import signal
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -37,6 +38,17 @@ COMMAND_STALE_SECONDS = 0.5
 # How long without a telemetry line from the board before the dashboard
 # should show it as "not reporting" even if the serial port is still open.
 TELEMETRY_STALE_SECONDS = 3.0
+
+_shutdown_requested = False
+
+
+def request_shutdown(signum, frame):
+    global _shutdown_requested
+    _shutdown_requested = True
+
+
+signal.signal(signal.SIGTERM, request_shutdown)
+signal.signal(signal.SIGINT, request_shutdown)
 
 
 def utc_now_iso():
@@ -189,6 +201,23 @@ def main():
 
                 while True:
                     tick_start = time.monotonic()
+
+                    if _shutdown_requested:
+                        # Ask the board to reset itself cleanly rather than
+                        # just dropping the connection - a bare disconnect
+                        # leaves it wherever it was mid-loop, which is
+                        # exactly the state that makes a subsequent
+                        # mpremote connection (e.g. firmware flashing
+                        # during update.sh) unreliable to interrupt into.
+                        # A real reset behaves like the physical reset
+                        # button, which has been reliable throughout.
+                        try:
+                            ser.write(b'{"reset":true}\n')
+                            ser.flush()
+                        except Exception:
+                            pass
+                        return
+
                     command = read_command()
 
                     mode = command.get("mode", "idle")
