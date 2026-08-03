@@ -536,3 +536,29 @@ tbody tr:hover {
     border: 1px solid #333;
     max-width: 100%;
 }
+
+.channel-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 0.6rem;
+}
+
+.channel-control {
+    background: var(--panel2);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 0.5rem;
+}
+
+.channel-control .channel-control-label {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.8rem;
+    color: var(--muted);
+    margin-bottom: 0.25rem;
+}
+
+.channel-control input[type="range"] {
+    width: 100%;
+    margin: 0;
+}

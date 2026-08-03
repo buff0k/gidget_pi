@@ -19,15 +19,19 @@ const joystickCtx = joystickCanvas.getContext("2d");
 const legCanvas = document.getElementById("legCanvas");
 const legCtx = legCanvas.getContext("2d");
 
+const channelGrid = document.getElementById("channelGrid");
+
 const JOY_RADIUS = (joystickCanvas.width / 2) - 18;
 const HEARTBEAT_MS = 200;
 const STATE_POLL_MS = 300;
 const ROTATE_MAGNITUDE = 90;
+const CHANNEL_COUNT = 18;
 
 let stickX = 0;   // -127..127, forward/back
 let stickY = 0;   // -127..127, left/right
 let stickActive = false;
 let rotateValue = 0; // -127..127, held while a rotate button is pressed
+let manualChannels = new Array(CHANNEL_COUNT).fill(90);
 
 
 function fmt(value, suffix = "") {
@@ -164,6 +168,53 @@ bindHoldButton(rotateLeftBtn, () => { rotateValue = -ROTATE_MAGNITUDE; }, () => 
 bindHoldButton(rotateRightBtn, () => { rotateValue = ROTATE_MAGNITUDE; }, () => { rotateValue = 0; });
 
 
+// ---- Manual channel sliders ----
+//
+// Raw per-channel control, bypassing gait/IK entirely - only takes effect
+// on the controller while Mode is "manual" (see hexapod_controller.py),
+// but the sliders themselves are always live so switching into Manual mode
+// doesn't require re-touching every channel.
+
+function buildChannelGrid() {
+    for (let i = 0; i < CHANNEL_COUNT; i++) {
+        const wrap = document.createElement("div");
+        wrap.className = "channel-control";
+
+        const label = document.createElement("div");
+        label.className = "channel-control-label";
+
+        const nameSpan = document.createElement("span");
+        nameSpan.textContent = `Ch ${i}`;
+
+        const valueSpan = document.createElement("span");
+        valueSpan.id = `channelValue${i}`;
+        valueSpan.textContent = "90°";
+
+        label.appendChild(nameSpan);
+        label.appendChild(valueSpan);
+
+        const slider = document.createElement("input");
+        slider.type = "range";
+        slider.min = "0";
+        slider.max = "180";
+        slider.step = "1";
+        slider.value = "90";
+        slider.id = `channelSlider${i}`;
+
+        slider.addEventListener("input", () => {
+            manualChannels[i] = Number(slider.value);
+            valueSpan.textContent = `${slider.value}°`;
+        });
+
+        wrap.appendChild(label);
+        wrap.appendChild(slider);
+        channelGrid.appendChild(wrap);
+    }
+}
+
+buildChannelGrid();
+
+
 // ---- Command heartbeat ----
 //
 // Runs continuously, not just while the joystick is being dragged, so a
@@ -179,6 +230,7 @@ async function sendCommand() {
         x: stickX,
         y: stickY,
         r: rotateValue,
+        manual_channels: manualChannels,
         source: "web-joystick",
     };
 

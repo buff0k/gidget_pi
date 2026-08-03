@@ -404,7 +404,7 @@ The updater runs `git pull --ff-only`, updates Python dependencies, updates appl
 | `/lidar/` | LIDAR/rangefinder telemetry and range history |
 | `/imu/` | BMI160 acceleration, gyro, and tilt telemetry |
 | `/camera/` | Live MJPEG camera stream with LIDAR/IMU/climate overlay |
-| `/hexapod/` | Hexapod joystick control, gait/mode selection, and live leg-position visualizer |
+| `/hexapod/` | Hexapod joystick control, gait/mode selection, live leg-position visualizer, and a per-channel manual/diagnostics panel for wiring bring-up |
 | `/config/` | Configuration/admin tools |
 | `/files/` | File browser |
 | `/users/` | User management |

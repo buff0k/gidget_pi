@@ -31,6 +31,7 @@
             <option value="idle">Idle</option>
             <option value="walk">Walk</option>
             <option value="calibrate_90">Calibrate (all servos to 90&deg;)</option>
+            <option value="manual">Manual (per-channel)</option>
         </select>
 
         <label for="gaitSelect">Gait</label>
@@ -54,6 +55,20 @@
             <button id="rotateLeftBtn" type="button">&#8634; Rotate Left</button>
             <button id="rotateRightBtn" type="button">Rotate Right &#8635;</button>
         </div>
+    </div>
+
+    <div class="card">
+        <h2>Manual / Diagnostics</h2>
+
+        <p class="muted">
+            Drives individual Servo 2040 channels directly, bypassing gait/IK
+            entirely - useful for bring-up with only a few servos wired, or
+            for checking one channel's range before <code>CHANNEL_MAP</code>
+            is finalized. Only takes effect while Mode above is set to
+            "Manual" - sliders are otherwise inert.
+        </p>
+
+        <div class="channel-grid" id="channelGrid"></div>
     </div>
 
     <div class="card">

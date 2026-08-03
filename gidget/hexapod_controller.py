@@ -113,7 +113,7 @@ def open_serial():
     return serial.Serial(SERIAL_PORT, BAUDRATE, timeout=0, write_timeout=0.05)
 
 
-def leg_state_payload(leg_xyz, angles, mode, gait, fast, malformed_lines, telemetry, connected):
+def leg_state_payload(leg_xyz, angles, channels, mode, gait, fast, malformed_lines, telemetry, connected):
     legs = []
 
     for leg in range(hk.LEG_COUNT):
@@ -145,6 +145,9 @@ def leg_state_payload(leg_xyz, angles, mode, gait, fast, malformed_lines, teleme
         "gait": gait,
         "fast": fast,
         "legs": legs,
+        # Raw 18-channel angles actually sent this tick, regardless of mode -
+        # what the manual/diagnostics panel reflects back for each slider.
+        "channels": [round(c, 1) for c in channels],
         "telemetry": telemetry,
         "malformed_lines": malformed_lines,
     }
@@ -159,6 +162,7 @@ def error_state_payload(error):
         "gait": None,
         "fast": None,
         "legs": [],
+        "channels": [],
         "telemetry": {},
         "malformed_lines": 0,
     }
@@ -206,12 +210,27 @@ def main():
                     if mode == "calibrate_90":
                         angles = hk.set_all_90()
                         leg_xyz = hk.home_leg_xyz()
+                        channels = hk.angles_to_channels(angles)
+                    elif mode == "manual":
+                        # Bypasses gait/IK entirely - raw per-channel angles
+                        # for wiring/bring-up diagnostics (e.g. testing a
+                        # couple of servos before the full rig is wired, or
+                        # probing one channel's range). Leg/angle state is
+                        # left at its last known value since it's not
+                        # meaningful without an IK solve.
+                        angles = previous_angles
+                        leg_xyz = gait_state.leg_xyz
+                        manual_channels = command.get("manual_channels")
+                        if isinstance(manual_channels, list) and len(manual_channels) == 18:
+                            channels = [hk.clamp(float(v), 0.0, 180.0) for v in manual_channels]
+                        else:
+                            channels = [90.0] * 18
                     else:
                         leg_xyz = hk.step_gait(gait_state, commanded_x, commanded_y, commanded_r, fast)
                         angles = hk.leg_angles_for_frame(leg_xyz, previous_angles)
+                        channels = hk.angles_to_channels(angles)
 
                     previous_angles = angles
-                    channels = hk.angles_to_channels(angles)
 
                     frame = json.dumps(
                         {"t": time.time(), "ch": [round(a, 1) for a in channels]},
@@ -235,7 +254,7 @@ def main():
                     )
 
                     save_state(leg_state_payload(
-                        leg_xyz, angles, active_mode, gait_state.gait, fast,
+                        leg_xyz, angles, channels, active_mode, gait_state.gait, fast,
                         malformed_lines, telemetry, connected,
                     ))
 

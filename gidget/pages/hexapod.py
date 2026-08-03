@@ -11,7 +11,8 @@ import hexapod_kinematics as hk
 STATE_FILE = Path("/dev/shm/gidget/hexapod_state.json")
 COMMAND_FILE = Path("/dev/shm/gidget/hexapod_command.json")
 
-VALID_MODES = ("idle", "walk", "calibrate_90")
+VALID_MODES = ("idle", "walk", "calibrate_90", "manual")
+CHANNEL_COUNT = 18
 
 blueprint = Blueprint("hexapod", __name__, url_prefix="/hexapod")
 
@@ -46,6 +47,21 @@ def clamp_speed(value):
         return hk.clamp(float(value), 0.0, 2.0)
     except Exception:
         return 1.0
+
+
+def sanitize_manual_channels(value):
+    """
+    Only used when mode == "manual" - a full 18-element array of raw
+    per-channel angles, bypassing gait/IK entirely. Returns None if the
+    shape is wrong, which hexapod_controller.py treats as "all neutral".
+    """
+    if not isinstance(value, list) or len(value) != CHANNEL_COUNT:
+        return None
+
+    try:
+        return [hk.clamp(float(v), 0.0, 180.0) for v in value]
+    except Exception:
+        return None
 
 
 @blueprint.route("/")
@@ -86,6 +102,7 @@ def api_command():
         "y": clamp_axis(data.get("y", 0)),
         "r": clamp_axis(data.get("r", 0)),
         "speed": clamp_speed(data.get("speed", 1.0)),
+        "manual_channels": sanitize_manual_channels(data.get("manual_channels")) if mode == "manual" else None,
         # Server-assigned - never trust a client-supplied timestamp, since
         # this is what the controller's staleness/deadman check relies on.
         "issued_at": time.time(),

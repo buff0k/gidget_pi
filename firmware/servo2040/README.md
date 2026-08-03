@@ -6,14 +6,23 @@ It is deliberately thin: it applies servo angles it's told to apply and reports 
 
 ## Flashing
 
-1. Install [Pimoroni's MicroPython build](https://github.com/pimoroni/pimoroni-pico/releases) for Servo 2040 (the `.uf2` file specific to this board, not a generic RP2040 MicroPython build — it's what provides the `servo`/`pimoroni` modules `main.py` imports).
-   - Hold **BOOT/BOOTSEL** while plugging in USB, or while pressing **RESET**, until it appears as a USB mass-storage drive.
+1. Install Pimoroni's MicroPython build from their [releases page](https://github.com/pimoroni/pimoroni-pico/releases). There is **no dedicated `servo2040` `.uf2`** — Pimoroni bundles support for their RP2040-based accessory boards (Servo 2040, Motor 2040, Plasma 2040, etc.) into the plain **`pico`** build, since those boards use the standard RP2040 chip with no extra onboard silicon; only boards with genuinely different hardware (Pico W's wireless chip, Tufty's display, Enviro's e-ink) get their own dedicated build. As of v1.27.0, the correct asset is:
+   ```text
+   pico-v1.27.0-pimoroni-micropython.uf2
+   ```
+   Check the releases page for a newer version before flashing — this was confirmed against the latest release at the time this was written, not guaranteed to stay current.
+   - Hold **BOOT/BOOTSEL** while plugging in USB, or while pressing **RESET**, until it appears as a USB mass-storage drive (commonly `RPI-RP2`).
    - Copy the `.uf2` file onto that drive. The board reboots into MicroPython automatically.
-2. Copy `main.py` from this directory onto the board as `main.py` (MicroPython runs whatever is saved as `main.py` on boot). Use [Thonny](https://thonny.org/) (Files panel, drag-and-drop) or `mpremote`:
+2. Confirm the `servo2040` module is actually present before going further (`mpremote` installs via `pip install mpremote`):
+   ```bash
+   mpremote connect <port> exec "import servo2040; print(servo2040.SERVO_1, servo2040.NUM_SERVOS)"
+   ```
+   If that raises `ImportError`, the build doesn't include Servo 2040 support — double check you flashed the `pico` variant, not a different board's build.
+3. Copy `main.py` from this directory onto the board as `main.py` (MicroPython runs whatever is saved as `main.py` on boot). Use [Thonny](https://thonny.org/) (Files panel, drag-and-drop) or `mpremote`:
    ```bash
    mpremote connect <port> cp main.py :main.py
    ```
-3. Reset the board (or power-cycle it). `main.py` starts automatically and begins listening on USB serial.
+4. Reset the board (or power-cycle it). `main.py` starts automatically and begins listening on USB serial.
 
 ## Verifying
 
