@@ -60,25 +60,17 @@ poll = select.poll()
 poll.register(sys.stdin, select.POLLIN)
 
 
-def degrees_to_value(angle_deg):
-    """
-    ServoCluster.value() takes -1.0..1.0 over the servo's configured range.
-    Map the 0-180 degree convention used on the Pi side onto that. Adjust
-    here if MG996 calibration needs a different pulse range than the
-    servo library's default.
-    """
-    normalized = (angle_deg - 90.0) / 90.0
-    return max(-1.0, min(1.0, normalized))
-
-
 def apply_channels(channels):
+    # Confirmed on real hardware: ServoCluster.value(index, angle) takes a
+    # raw degree value directly, matching the 0-180 convention used
+    # everywhere else in this project - no normalization needed.
     for i in range(min(NUM_CHANNELS, len(channels))):
-        cluster.value(i, degrees_to_value(channels[i]))
+        cluster.value(i, channels[i])
 
 
 def apply_neutral():
     for i in range(NUM_CHANNELS):
-        cluster.value(i, 0.0)
+        cluster.value(i, 90.0)
 
 
 def read_lines(buffer):
