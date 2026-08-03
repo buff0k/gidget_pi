@@ -110,7 +110,12 @@ class SerialLineReader:
 
 
 def open_serial():
-    return serial.Serial(SERIAL_PORT, BAUDRATE, timeout=0, write_timeout=0.05)
+    # write_timeout is deliberately more forgiving than the 20ms tick
+    # target: a transient stall on the board (ADC read, JSON encode, print)
+    # should cost one slow tick, not blow up the whole connection and force
+    # a reconnect - repeated reconnect churn is itself a plausible
+    # contributor to the RP2040's USB CDC stack wedging under load.
+    return serial.Serial(SERIAL_PORT, BAUDRATE, timeout=0, write_timeout=0.2)
 
 
 def leg_state_payload(leg_xyz, angles, channels, mode, gait, fast, malformed_lines, telemetry, connected):
