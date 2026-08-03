@@ -54,6 +54,17 @@ adc_mux = AnalogMux(
 )
 
 cluster = ServoCluster(0, 0, list(range(servo2040.SERVO_1, servo2040.SERVO_18 + 1)))
+
+# Command a safe neutral BEFORE enabling PWM output, not after. A channel's
+# value before its first explicit .value() call is whatever ServoCluster
+# defaults to internally, which was never actually confirmed safe - if it
+# is not 90deg, enable_all() would drive straight to that default the
+# instant output turns on, before the watchdog below ever gets a chance to
+# intervene. This is very likely what caused servos to slam to extremes on
+# power-up even with nothing sending commands yet.
+for _channel in range(NUM_CHANNELS):
+    cluster.value(_channel, 90.0)
+
 cluster.enable_all()
 
 poll = select.poll()
