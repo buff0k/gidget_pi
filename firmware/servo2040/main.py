@@ -103,12 +103,17 @@ def read_rail_telemetry():
 
 
 def send_telemetry():
+    error = None
+
     try:
         voltage_v, current_a = read_rail_telemetry()
         ok = True
-    except Exception:
+    except Exception as e:
         voltage_v, current_a = None, None
         ok = False
+        # str(e) is often empty on MicroPython for some exception types -
+        # the exception's class name is usually the more useful part.
+        error = "{}: {}".format(type(e).__name__, e)
 
     print(json.dumps({
         "type": "telemetry",
@@ -116,6 +121,7 @@ def send_telemetry():
         "voltage_v": voltage_v,
         "current_a": current_a,
         "ok": ok,
+        "error": error,
     }))
 
 
