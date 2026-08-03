@@ -26,6 +26,7 @@ PAGE_MODULES = [
     "pages.lidar",
     "pages.imu",
     "pages.camera",
+    "pages.hexapod",
     "pages.config_page",
     "pages.files",
     "pages.users",

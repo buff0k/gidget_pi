@@ -522,3 +522,17 @@ tbody tr:hover {
         grid-template-columns: 1fr;
     }
 }
+
+.joystick-wrap {
+    display: flex;
+    justify-content: center;
+    margin-top: 1rem;
+}
+
+.joystick-wrap canvas {
+    touch-action: none;
+    border-radius: 50%;
+    background: #050505;
+    border: 1px solid #333;
+    max-width: 100%;
+}

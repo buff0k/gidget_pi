@@ -1,8 +1,8 @@
 # gidget_pi
 
-Software stack for **Gidget**, a Raspberry Pi robot controller with a Flask dashboard, GPS tracking, OLED status output, WiFi management, file browsing, a live camera feed, and live sensor telemetry.
+Software stack for **Gidget**, a Raspberry Pi-controlled hexapod with a Flask dashboard, GPS tracking, OLED status output, WiFi management, file browsing, a live camera feed, live sensor telemetry, and web-driven leg control.
 
-The project started on a Pi Zero WH and has since migrated to a Raspberry Pi 5 (2GB) with a Camera Module added. The code still favours simple systemd services and lightweight JSON state files over heavier robotics middleware, since that model carried over cleanly from the Pi Zero build.
+The project started on a Pi Zero WH and has since migrated to a Raspberry Pi 5 (2GB), added a Camera Module, and added a Pimoroni Servo 2040 driving 18 leg servos. The code still favours simple systemd services and lightweight JSON state files over heavier robotics middleware, since that model carried over cleanly through each hardware change.
 
 ## Current features
 
@@ -14,7 +14,8 @@ The project started on a Pi Zero WH and has since migrated to a Raspberry Pi 5 (
 - Environmental telemetry from AHT20 + BMP280
 - VL53L0X / VL53L1X LIDAR/rangefinder telemetry
 - BMI160 6-axis IMU telemetry
-- Live MJPEG camera stream with sensor overlay
+- Live MJPEG camera stream with sensor overlay, including an optional HUD-style false horizon
+- Hexapod leg control: inverse kinematics + 4 gaits (tripod/wave/ripple/tetrapod) computed on the Pi, driven by a web joystick, with a live leg-position visualizer
 - File browser for track/history data
 - System health metrics including CPU temperature, CPU usage, memory, disk, and uptime
 - Installer and updater scripts for Raspberry Pi deployment
@@ -28,6 +29,7 @@ Tested target:
 ```text
 Raspberry Pi 5 (2GB)
 Raspberry Pi Camera Module (CSI)
+Pimoroni Servo 2040 (18-channel hexapod leg driver, USB)
 Raspberry Pi OS / Debian Trixie based install
 I2C enabled
 Hardware UART enabled for GPS
@@ -47,6 +49,7 @@ Originally built and tested against a Raspberry Pi Zero WH; the sensor code (Bli
 | BMI160 | I2C | `0x68` or `0x69` | Acceleration, gyro, pitch/roll estimate |
 | GPS module | UART | `/dev/serial0` | Position, speed, course, track logging |
 | Raspberry Pi Camera Module | CSI | `/dev/video0` (via libcamera) | Live MJPEG video feed |
+| Pimoroni Servo 2040 | USB (not I2C) | `/dev/gidget-servo2040` (udev-stabilized) | Drives 18x MG996 hexapod leg servos, reports rail voltage/current |
 
 A healthy I2C scan with the current modules may look similar to:
 
@@ -225,6 +228,37 @@ in `/boot/firmware/config.txt`, then reboot.
 
 The `gidget` service user needs `video`/`render` group membership to access `/dev/video*` — the installer adds this automatically (see [Installation](#initial-install)).
 
+### Pimoroni Servo 2040 (18-channel hexapod driver)
+
+The Servo 2040 drives all 18 leg servos and connects to the Pi over **USB, not I2C** — despite the RP2040 having I2C hardware, Pimoroni's stock MicroPython firmware doesn't support running it as an I2C target/slave device, so USB serial is the only practical link:
+
+```text
+Servo power: 18x MG996 servos powered from the Servo 2040's own dedicated
+             5V servo power rail (JST-PH input), separate from its USB/logic
+             power. Size this supply for real stall current across 18
+             servos, not just typical running current.
+Data:        Servo 2040 USB-C -> Pi 5 USB-A, plain USB cable.
+```
+
+All gait/IK computation runs on the Pi (`gidget/hexapod_kinematics.py` + `gidget/hexapod_controller.py`); the Servo 2040 itself only runs the thin peripheral firmware in `firmware/servo2040/` (flashed manually — see that directory's `README.md`, since it's outside this repo's apt/pip dependency chain).
+
+Two things are real hardware facts that only get filled in once the board is wired up — both are called out with `PLACEHOLDER` comments at the point they're used, so they're easy to find:
+
+```text
+CHANNEL_MAP in gidget/hexapod_kinematics.py
+    Which of the Servo 2040's 18 channels drives which (leg, joint).
+    Ships as a sequential 0-17 placeholder in leg order.
+
+idVendor/idProduct in udev/99-gidget-servo2040.rules
+    The board's actual USB VID:PID, so /dev/gidget-servo2040 stays a
+    stable path regardless of USB enumeration order. Find the real
+    values once connected with:
+        lsusb
+        udevadm info -a -n /dev/ttyACM0 | grep -E 'idVendor|idProduct'
+```
+
+The leg geometry constants (segment lengths, home positions, per-leg calibration) in `hexapod_kinematics.py` are **not** placeholders — they're ported as final values from the reference hexapod build this project is based on.
+
 ## Repository layout
 
 ```text
@@ -233,12 +267,20 @@ gidget_pi/
 ├── install.sh
 ├── pyproject.toml
 ├── update.sh
+├── firmware/
+│   └── servo2040/
+│       ├── main.py
+│       └── README.md
+├── udev/
+│   └── 99-gidget-servo2040.rules
 ├── gidget/
 │   ├── app.py
 │   ├── auth.py
 │   ├── camera_reader.py
 │   ├── env_reader.py
 │   ├── gps_reader.py
+│   ├── hexapod_controller.py
+│   ├── hexapod_kinematics.py
 │   ├── imu_reader.py
 │   ├── lidar_reader.py
 │   ├── oled_status.py
@@ -251,6 +293,7 @@ gidget_pi/
     ├── gidget-camera.service
     ├── gidget-env.service
     ├── gidget-gps.service
+    ├── gidget-hexapod.service
     ├── gidget-imu.service
     ├── gidget-lidar.service
     ├── gidget-oled.service
@@ -264,7 +307,7 @@ gidget/config/users.json
 gidget/data/tracks/*.jsonl
 ```
 
-Live sensor telemetry (GPS status, LIDAR, IMU, environment, and camera state) is written to `/dev/shm/gidget/` (tmpfs, RAM-backed) rather than `/opt/gidget` on the SD card, so none of it appears in the repo or on disk:
+Live sensor telemetry (GPS status, LIDAR, IMU, environment, camera, and hexapod state) is written to `/dev/shm/gidget/` (tmpfs, RAM-backed) rather than `/opt/gidget` on the SD card, so none of it appears in the repo or on disk:
 
 ```text
 /dev/shm/gidget/status_state.json
@@ -273,7 +316,11 @@ Live sensor telemetry (GPS status, LIDAR, IMU, environment, and camera state) is
 /dev/shm/gidget/imu_state.json
 /dev/shm/gidget/camera_state.json
 /dev/shm/gidget/camera_frame.jpg
+/dev/shm/gidget/hexapod_state.json
+/dev/shm/gidget/hexapod_command.json
 ```
+
+`hexapod_command.json` is the one file in that list written by the web process rather than a reader service — it's the relay the dashboard's joystick uses to reach `gidget-hexapod.service` (see [Services](#services) below), timestamped so the controller can detect and ignore a stale command.
 
 This is deliberate: these files are rewritten multiple times per second (GPS state in particular used to be rewritten on nearly every NMEA sentence, several times a second) and have no need to survive a reboot, so keeping them off the SD card avoids wearing out the card. Only GPS track history (`gidget/data/tracks/*.jsonl`) persists to the SD card, since that's data you actually want to keep across reboots.
 
@@ -295,6 +342,8 @@ Interface Options -> Serial Port
 ```
 
 Connect the Camera Module to the CSI connector (see [Raspberry Pi Camera Module (CSI)](#raspberry-pi-camera-module-csi) above). No `raspi-config` toggle is needed for the camera on Bookworm/Trixie-based Raspberry Pi OS — `camera_auto_detect=1` is on by default.
+
+Connect the Servo 2040 over USB (see [Pimoroni Servo 2040](#pimoroni-servo-2040-18-channel-hexapod-driver) above) — no `raspi-config` step either, since it's a plain USB serial device, not an I2C/CSI peripheral. Its own firmware needs to be flashed separately; see `firmware/servo2040/README.md`.
 
 Then reboot:
 
@@ -355,6 +404,7 @@ The updater runs `git pull --ff-only`, updates Python dependencies, updates appl
 | `/lidar/` | LIDAR/rangefinder telemetry and range history |
 | `/imu/` | BMI160 acceleration, gyro, and tilt telemetry |
 | `/camera/` | Live MJPEG camera stream with LIDAR/IMU/climate overlay |
+| `/hexapod/` | Hexapod joystick control, gait/mode selection, and live leg-position visualizer |
 | `/config/` | Configuration/admin tools |
 | `/files/` | File browser |
 | `/users/` | User management |
@@ -381,11 +431,16 @@ gidget-camera.service
     Owns the camera exclusively; captures JPEG frames to tmpfs for the web
     process to stream, and writes camera_state.json
 
+gidget-hexapod.service
+    Owns the Servo 2040 serial connection exclusively; runs the 20ms
+    gait/IK tick loop, sends servo angles, reads back rail voltage/current,
+    and writes hexapod_state.json
+
 gidget-oled.service
     OLED status display
 ```
 
-Note that `gidget-camera.service` is the sole owner of the camera hardware. The web process never opens the camera itself — it only reads the latest frame that `gidget-camera.service` has written to `/dev/shm/gidget/camera_frame.jpg`. Restarting `gidget-camera.service` briefly interrupts the `/camera/` stream but does not affect the web process.
+Note that `gidget-camera.service` is the sole owner of the camera hardware and `gidget-hexapod.service` is the sole owner of the Servo 2040 serial connection — the web process never touches either piece of hardware directly, it only reads the tmpfs state each writes and, for the hexapod, writes a command file the controller polls (`/dev/shm/gidget/hexapod_command.json`). A command older than 0.5s is treated as stale and forced to idle/neutral, so a dropped browser connection can't leave the robot walking; the Servo 2040's own firmware (`firmware/servo2040/`) additionally holds a second, independent watchdog in case `gidget-hexapod.service` itself crashes or is mid-restart.
 
 Useful commands:
 
@@ -396,6 +451,7 @@ systemctl status gidget-env.service --no-pager
 systemctl status gidget-lidar.service --no-pager
 systemctl status gidget-imu.service --no-pager
 systemctl status gidget-camera.service --no-pager
+systemctl status gidget-hexapod.service --no-pager
 systemctl status gidget-oled.service --no-pager
 
 journalctl -u gidget-web.service -n 100 --no-pager
@@ -404,6 +460,7 @@ journalctl -u gidget-env.service -n 100 --no-pager
 journalctl -u gidget-lidar.service -n 100 --no-pager
 journalctl -u gidget-imu.service -n 100 --no-pager
 journalctl -u gidget-camera.service -n 100 --no-pager
+journalctl -u gidget-hexapod.service -n 100 --no-pager
 journalctl -u gidget-oled.service -n 100 --no-pager
 ```
 
@@ -420,12 +477,15 @@ Current telemetry rates:
 | Environment | 5.00s | every sample | latest values |
 | GPS | per NMEA sentence | per NMEA sentence | latest values (track history separately, see below) |
 | Camera | 0.10s (~10 fps) | frame: every capture; state: 2.00s | latest frame only |
+| Hexapod | 0.02s (50Hz gait tick) | every tick | latest leg positions only |
 
 GPS is the busiest writer by far — a typical module emits several NMEA sentences (RMC, GGA, GSA, GSV) per second, each triggering a state rewrite. This is fine on tmpfs but would have been a serious SD card wear source if left on disk, which is why it moved along with the others.
 
 GPS **track history** (`gidget/data/tracks/*.jsonl`) is the one telemetry write that intentionally stays on the SD card, since it's meant to persist across reboots. It's throttled independently to one append per second while the vehicle has a fix and is moving, which keeps it lightweight regardless of how often the tmpfs state above is rewritten.
 
 The camera writes each JPEG frame to `/dev/shm` (tmpfs) as well, so continuous frame writes don't cause SD card wear. Frame rate/resolution/JPEG quality are set in `camera_reader.py` (`RESOLUTION`, `CAPTURE_SECONDS`, `JPEG_QUALITY`) — raise capture rate or resolution only after confirming CPU headroom, since encoding cost scales with both.
+
+The hexapod's 50Hz tick is the fastest loop in this codebase — it's the one place the Pi 5's headroom over the original Pi Zero actually matters for correctness, not just comfort, since IK + gait math for 18 servos has to complete well inside each 20ms frame. If that loop ever falls behind, `gidget-hexapod.service` logs are the first place to check (`journalctl -u gidget-hexapod.service`), followed by whether the Servo 2040's USB serial write is blocking (see the reconnect/error handling notes in `hexapod_controller.py`).
 
 If CPU is pinned, identify the process first:
 

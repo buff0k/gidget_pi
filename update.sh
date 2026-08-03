@@ -9,7 +9,7 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENV_DIR="${APP_DIR}/.venv"
 SUDOERS_FILE="/etc/sudoers.d/gidget"
 SYSTEMD_DIR="/etc/systemd/system"
-SERVICES=(gidget-gps.service gidget-env.service gidget-lidar.service gidget-imu.service gidget-camera.service gidget-oled.service gidget-web.service)
+SERVICES=(gidget-gps.service gidget-env.service gidget-lidar.service gidget-imu.service gidget-camera.service gidget-hexapod.service gidget-oled.service gidget-web.service)
 UPDATE_FLAG_FILE="${SHM_DIR}/update_in_progress"
 
 log() { printf '\n[update] %s\n' "$*"; }
@@ -185,8 +185,20 @@ install_systemd_services() {
     install -m 0644 "${REPO_DIR}/systemd/gidget-lidar.service" "${SYSTEMD_DIR}/gidget-lidar.service"
     install -m 0644 "${REPO_DIR}/systemd/gidget-imu.service" "${SYSTEMD_DIR}/gidget-imu.service"
     install -m 0644 "${REPO_DIR}/systemd/gidget-camera.service" "${SYSTEMD_DIR}/gidget-camera.service"
+    install -m 0644 "${REPO_DIR}/systemd/gidget-hexapod.service" "${SYSTEMD_DIR}/gidget-hexapod.service"
     install -m 0644 "${REPO_DIR}/systemd/gidget-oled.service" "${SYSTEMD_DIR}/gidget-oled.service"
     install -m 0644 "${REPO_DIR}/systemd/gidget-web.service" "${SYSTEMD_DIR}/gidget-web.service"
+}
+
+install_udev_rules() {
+    log "Updating udev rules"
+
+    [ -d "${REPO_DIR}/udev" ] || fail "Missing udev/ folder in repo root"
+
+    install -m 0644 "${REPO_DIR}/udev/99-gidget-servo2040.rules" /etc/udev/rules.d/99-gidget-servo2040.rules
+
+    udevadm control --reload-rules
+    udevadm trigger
 }
 
 install_sudoers() {
@@ -198,6 +210,7 @@ gidget ALL=(root) NOPASSWD: /usr/bin/systemctl restart gidget-env.service
 gidget ALL=(root) NOPASSWD: /usr/bin/systemctl restart gidget-lidar.service
 gidget ALL=(root) NOPASSWD: /usr/bin/systemctl restart gidget-imu.service
 gidget ALL=(root) NOPASSWD: /usr/bin/systemctl restart gidget-camera.service
+gidget ALL=(root) NOPASSWD: /usr/bin/systemctl restart gidget-hexapod.service
 gidget ALL=(root) NOPASSWD: /usr/bin/systemctl restart gidget-oled.service
 gidget ALL=(root) NOPASSWD: /usr/bin/systemctl restart gidget-gps.service
 gidget ALL=(root) NOPASSWD: /usr/bin/systemctl restart gidget-web.service
@@ -247,6 +260,7 @@ main() {
     sync_application_files
     ensure_runtime_files
     install_systemd_services
+    install_udev_rules
     install_sudoers
     fix_permissions
     restart_services

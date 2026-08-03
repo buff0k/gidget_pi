@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+
+{% set active_page = "hexapod" %}
+
+{% block content %}
+<section class="page-wrap">
+    <div class="card">
+        <h2>Hexapod</h2>
+
+        <div class="grid">
+            <div class="metric"><div class="label">Status</div><div id="hexapodStatus" class="value">n/a</div></div>
+            <div class="metric"><div class="label">Servo 2040</div><div id="hexapodConnected" class="value">n/a</div></div>
+            <div class="metric"><div class="label">Mode</div><div id="hexapodMode" class="value">n/a</div></div>
+            <div class="metric"><div class="label">Gait</div><div id="hexapodGait" class="value">n/a</div></div>
+            <div class="metric"><div class="label">Rail Voltage</div><div id="hexapodVoltage" class="value">n/a</div></div>
+            <div class="metric"><div class="label">Rail Current</div><div id="hexapodCurrent" class="value">n/a</div></div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Control</h2>
+
+        <p class="muted">
+            Drag the pad to walk. Releasing it snaps back to neutral immediately -
+            the server also forces a stop if no command arrives for half a second,
+            so a dropped connection can't leave it walking.
+        </p>
+
+        <label for="modeSelect">Mode</label>
+        <select id="modeSelect">
+            <option value="idle">Idle</option>
+            <option value="walk">Walk</option>
+            <option value="calibrate_90">Calibrate (all servos to 90&deg;)</option>
+        </select>
+
+        <label for="gaitSelect">Gait</label>
+        <select id="gaitSelect">
+            <option value="tripod">Tripod</option>
+            <option value="wave">Wave</option>
+            <option value="ripple">Ripple</option>
+            <option value="tetrapod">Tetrapod</option>
+        </select>
+
+        <label class="checkbox-label">
+            <input id="fastToggle" type="checkbox" checked>
+            Fast gait speed
+        </label>
+
+        <div class="joystick-wrap">
+            <canvas id="joystickCanvas" width="220" height="220"></canvas>
+        </div>
+
+        <div class="row" style="justify-content: center;">
+            <button id="rotateLeftBtn" type="button">&#8634; Rotate Left</button>
+            <button id="rotateRightBtn" type="button">Rotate Right &#8635;</button>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Leg Positions</h2>
+        <canvas id="legCanvas" width="900" height="420"></canvas>
+        <div class="viewer-meta" id="hexapodMeta">Waiting for hexapod state...</div>
+    </div>
+
+    <div class="card">
+        <h2>Raw Hexapod State</h2>
+        <pre id="hexapodJson" class="terminal">Waiting for hexapod...</pre>
+    </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/hexapod.js"></script>
+{% endblock %}

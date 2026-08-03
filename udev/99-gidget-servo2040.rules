@@ -1,0 +1,16 @@
+# Stable device path for the hexapod's Pimoroni Servo 2040, so it doesn't
+# shift between /dev/ttyACM0, /dev/ttyACM1, etc. depending on what other USB
+# devices are plugged in or enumeration order at boot.
+#
+# PLACEHOLDER - idVendor/idProduct below are not yet confirmed. Once the
+# board is connected to the Pi, find the real values with:
+#   lsusb
+#   udevadm info -a -n /dev/ttyACM0 | grep -E 'idVendor|idProduct'
+# and update this rule accordingly, then:
+#   sudo udevadm control --reload-rules && sudo udevadm trigger
+#
+# Pimoroni/Raspberry Pi RP2040 boards commonly enumerate under the
+# Raspberry Pi Foundation vendor ID (2e8a) when running MicroPython's
+# built-in USB CDC serial - confirm the exact idProduct for this board
+# rather than assuming it.
+SUBSYSTEM=="tty", ATTRS{idVendor}=="2e8a", ATTRS{idProduct}=="0005", SYMLINK+="gidget-servo2040"
