@@ -74,18 +74,26 @@ def apply_neutral():
 
 
 def read_lines(buffer):
-    """Drain whatever is waiting on stdin without blocking, split on '\\n'."""
+    """
+    Drain whatever is waiting on stdin without blocking, split on '\\n'.
+
+    Reads in chunks, not byte-by-byte - at the Pi's ~50Hz command rate this
+    is a genuinely continuous ~150-200 bytes/sec stream, and per-byte
+    poll()+read() overhead couldn't keep up with it. That backpressure is
+    the likely cause of the write timeouts seen only when the real
+    Pi-side service (constant 50Hz writes) is driving the connection,
+    never in manual mpremote testing (which never sustained that rate).
+    """
     lines = []
 
     while poll.poll(0):
-        chunk = sys.stdin.read(1)
+        chunk = sys.stdin.read(256)
         if not chunk:
             break
-        if chunk == "\n":
-            lines.append(buffer)
-            buffer = ""
-        else:
-            buffer += chunk
+        buffer += chunk
+        while "\n" in buffer:
+            line, buffer = buffer.split("\n", 1)
+            lines.append(line)
 
     return lines, buffer
 

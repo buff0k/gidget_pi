@@ -238,7 +238,7 @@ def main():
                     previous_angles = angles
 
                     frame = json.dumps(
-                        {"t": time.time(), "ch": [round(a, 1) for a in channels]},
+                        {"t": round(time.time(), 2), "ch": [round(a, 1) for a in channels]},
                         separators=(",", ":"),
                     ) + "\n"
                     ser.write(frame.encode("ascii"))
