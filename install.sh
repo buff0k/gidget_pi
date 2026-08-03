@@ -248,6 +248,37 @@ fix_permissions() {
     chmod 0755 "${SHM_DIR}" 2>/dev/null || true
 }
 
+update_hexapod_firmware() {
+    log "Checking for a connected Servo 2040 to flash firmware onto"
+
+    if [ ! -x "${VENV_DIR}/bin/mpremote" ]; then
+        log "mpremote not installed in venv - skipping Servo 2040 firmware flash"
+        return
+    fi
+
+    local port=""
+    for candidate in /dev/gidget-servo2040 /dev/ttyACM0 /dev/ttyACM1; do
+        if [ -e "$candidate" ]; then
+            port="$candidate"
+            break
+        fi
+    done
+
+    if [ -z "$port" ]; then
+        log "No Servo 2040 detected - skipping firmware flash"
+        return
+    fi
+
+    log "Flashing firmware/servo2040/main.py to Servo 2040 at ${port}"
+
+    if "${VENV_DIR}/bin/mpremote" connect "$port" cp "${REPO_DIR}/firmware/servo2040/main.py" :main.py; then
+        "${VENV_DIR}/bin/mpremote" connect "$port" reset || true
+        log "Servo 2040 firmware flashed"
+    else
+        log "WARNING: Servo 2040 firmware flash failed - board may need manual attention, see firmware/servo2040/README.md"
+    fi
+}
+
 enable_and_start_services() {
     log "Enabling and starting Gidget services"
 
@@ -268,6 +299,7 @@ main() {
     install_udev_rules
     install_sudoers
     fix_permissions
+    update_hexapod_firmware
     enable_and_start_services
 
     log "Install complete"
