@@ -26,13 +26,20 @@ It is deliberately thin: it applies servo angles it's told to apply and reports 
 
 ## Verifying
 
-With the board connected to a PC (not yet the Pi), open a serial terminal (Thonny's REPL, or `mpremote connect <port> repl`) and send a test command line:
+The fastest debug loop is running `main.py` live from the Pi without saving it to the board first — this streams the board's stdout (including tracebacks) straight back to your terminal:
 
-```json
-{"t": 0, "ch": [90,90,90,90,90,90,90,90,90,90,90,90,90,90,90,90,90,90]}
+```bash
+sudo systemctl stop gidget-hexapod.service   # so nothing else holds the port
+mpremote connect <port> run firmware/servo2040/main.py
+# Ctrl-C to stop
+sudo systemctl start gidget-hexapod.service  # hand the port back when done
 ```
 
-All 18 channels should center. Within ~500ms you should see a `{"type": "telemetry", ...}` line reported back. If servos don't move, or the ADC read fails, cross-check the `ServoCluster`/`Analog`/`AnalogMux` calls in `main.py` against `help(ServoCluster)` / `help(Analog)` on your installed firmware version — Pimoroni has adjusted these constructor signatures across releases, and `main.py` was written against their examples as documented at the time, not verified against real hardware.
+You should see a `{"type": "telemetry", "ok": true, "voltage_v": ..., "current_a": ..., ...}` line roughly every 500ms. `"ok": false` means `read_rail_telemetry()` threw — the `"error"` field it includes gives the exception type and message, which is usually enough to fix directly.
+
+The `Analog`/`AnalogMux` construction in `main.py` is matched verbatim against Pimoroni's own `read_sensors.py`/`current_meter.py` examples (fetched from `pimoroni-pico` on GitHub) — notably `AnalogMux`'s `muxed_pin` argument needs an actual `machine.Pin`, not a raw pin number or an `Analog(...)` wrapper (both fail with `AttributeError: ... has no attribute 'init'`, which is what the constructor calls internally on whatever it's given). If a future Pimoroni firmware update changes this again, that's the failure mode to expect.
+
+Once telemetry looks right, confirm servo motion separately — telemetry failing doesn't necessarily mean channel commands aren't being applied, and vice versa. With `gidget-hexapod.service` running, use the Manual/Diagnostics sliders on `/hexapod/` to drive individual channels directly.
 
 ## Once wired to the actual hexapod
 

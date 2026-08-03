@@ -21,10 +21,10 @@ alone can't, since the RP2040's PWM hardware would otherwise just keep
 outputting its last value indefinitely.
 
 NOTE: the ServoCluster/Analog/AnalogMux calls below follow Pimoroni's
-documented servo2040 examples as of when this was written. If servos don't
-respond after flashing, check `help(ServoCluster)` / `help(Analog)` on-device
-against your installed pimoroni-pico firmware version - see README.md in
-this directory.
+official servo2040 example (read_sensors.py / current_meter.py in
+pimoroni-pico), fetched and matched verbatim after earlier guesses got the
+AnalogMux constructor wrong - see README.md in this directory for how that
+was diagnosed.
 """
 
 import sys
@@ -32,6 +32,7 @@ import select
 import time
 import json
 
+from machine import Pin
 from servo import ServoCluster, servo2040
 from pimoroni import Analog, AnalogMux
 
@@ -41,12 +42,15 @@ WATCHDOG_MS = 1000
 TELEMETRY_INTERVAL_MS = 500
 
 voltage_sense = Analog(servo2040.SHARED_ADC, servo2040.VOLTAGE_GAIN)
-current_sense = Analog(servo2040.SHARED_ADC, servo2040.CURRENT_GAIN, servo2040.SHUNT_RESISTOR)
+current_sense = Analog(
+    servo2040.SHARED_ADC, servo2040.CURRENT_GAIN,
+    servo2040.SHUNT_RESISTOR, servo2040.CURRENT_OFFSET,
+)
 adc_mux = AnalogMux(
     servo2040.ADC_ADDR_0, servo2040.ADC_ADDR_1, servo2040.ADC_ADDR_2,
-    # Raw pin constant, not an Analog(...) wrapper - AnalogMux calls .init()
-    # on this internally, which only a raw pin identifier supports.
-    muxed_pin=servo2040.SHARED_ADC,
+    # Needs an actual machine.Pin, not a raw int or an Analog(...) wrapper -
+    # AnalogMux calls .init() on this internally.
+    muxed_pin=Pin(servo2040.SHARED_ADC),
 )
 
 cluster = ServoCluster(0, 0, list(range(servo2040.SERVO_1, servo2040.SERVO_18 + 1)))
