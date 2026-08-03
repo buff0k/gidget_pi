@@ -209,9 +209,6 @@ def main():
                         active_gait = gait
                     active_mode = mode
 
-                    if mode == "idle":
-                        commanded_x = commanded_y = commanded_r = 0.0
-
                     if mode == "calibrate_90":
                         angles = hk.set_all_90()
                         leg_xyz = hk.home_leg_xyz()
@@ -230,10 +227,23 @@ def main():
                             channels = [hk.clamp(float(v), 0.0, 180.0) for v in manual_channels]
                         else:
                             channels = [90.0] * 18
-                    else:
+                    elif mode == "walk":
                         leg_xyz = hk.step_gait(gait_state, commanded_x, commanded_y, commanded_r, fast)
                         angles = hk.leg_angles_for_frame(leg_xyz, previous_angles)
                         channels = hk.angles_to_channels(angles)
+                    else:
+                        # "idle" (and any unrecognized mode, including the
+                        # stale-command fallback in read_command()) is a
+                        # true raw-neutral state - NOT the IK-computed home
+                        # stance. That distinction matters: home-stance
+                        # joint angles (visible earlier as e.g. femur=146,
+                        # tibia=35) are only safe once servo horns are
+                        # physically calibrated against a known 90 deg
+                        # reference. Idle must never depend on that having
+                        # happened yet.
+                        angles = previous_angles
+                        leg_xyz = gait_state.leg_xyz
+                        channels = [90.0] * 18
 
                     previous_angles = angles
 
