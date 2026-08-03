@@ -39,6 +39,15 @@ COMMAND_STALE_SECONDS = 0.5
 # should show it as "not reporting" even if the serial port is still open.
 TELEMETRY_STALE_SECONDS = 3.0
 
+# Gait/IK is still stepped every 20ms tick for smooth motion, but the
+# board is only sent a new frame this often. MicroPython parsing a full
+# 18-channel JSON line plus 18 ServoCluster.value() calls every single
+# 20ms tick appears to be more than it can sustain - the Pi's write
+# buffer backs up over time and ser.write() eventually times out, even
+# though the read side alone (chunked, not byte-by-byte) keeps up fine.
+# 20Hz on the wire is still smooth enough for servo motion.
+SERIAL_SEND_INTERVAL_SECONDS = 0.05
+
 _shutdown_requested = False
 
 
@@ -198,6 +207,7 @@ def main():
         try:
             with open_serial() as ser:
                 reader = SerialLineReader(ser)
+                last_send_time = 0.0
 
                 while True:
                     tick_start = time.monotonic()
@@ -276,11 +286,14 @@ def main():
 
                     previous_angles = angles
 
-                    frame = json.dumps(
-                        {"t": round(time.time(), 2), "ch": [round(a, 1) for a in channels]},
-                        separators=(",", ":"),
-                    ) + "\n"
-                    ser.write(frame.encode("ascii"))
+                    now = time.monotonic()
+                    if now - last_send_time >= SERIAL_SEND_INTERVAL_SECONDS:
+                        frame = json.dumps(
+                            {"t": round(time.time(), 2), "ch": [round(a, 1) for a in channels]},
+                            separators=(",", ":"),
+                        ) + "\n"
+                        ser.write(frame.encode("ascii"))
+                        last_send_time = now
 
                     for line in reader.poll_lines():
                         try:

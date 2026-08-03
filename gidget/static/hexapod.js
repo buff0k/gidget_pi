@@ -6,6 +6,9 @@ const voltageEl = document.getElementById("hexapodVoltage");
 const currentEl = document.getElementById("hexapodCurrent");
 const metaEl = document.getElementById("hexapodMeta");
 const jsonEl = document.getElementById("hexapodJson");
+const copyStateBtn = document.getElementById("copyStateBtn");
+const freezeStateBtn = document.getElementById("freezeStateBtn");
+const copyStateStatus = document.getElementById("copyStateStatus");
 
 const modeSelect = document.getElementById("modeSelect");
 const gaitSelect = document.getElementById("gaitSelect");
@@ -351,7 +354,42 @@ function drawLegs(legs) {
 
 // ---- State poll ----
 
+let lastState = {};
+let frozen = false;
+
+async function copyStateText() {
+    const text = JSON.stringify(lastState, null, 2);
+
+    try {
+        if (!navigator.clipboard || !navigator.clipboard.writeText) {
+            throw new Error("Clipboard API unavailable");
+        }
+        await navigator.clipboard.writeText(text);
+        copyStateStatus.textContent = "Copied";
+        setTimeout(() => { copyStateStatus.textContent = ""; }, 2000);
+    } catch (e) {
+        // navigator.clipboard is often restricted to HTTPS/localhost - on a
+        // plain http://gidget.local connection it may not exist at all.
+        // Fall back to selecting the text so Ctrl-C / long-press-copy works.
+        const range = document.createRange();
+        range.selectNodeContents(jsonEl);
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+        copyStateStatus.textContent = "Auto-copy unavailable here - text selected, press Ctrl-C";
+    }
+}
+
+copyStateBtn.addEventListener("click", copyStateText);
+
+freezeStateBtn.addEventListener("click", () => {
+    frozen = !frozen;
+    freezeStateBtn.textContent = frozen ? "Resume updates" : "Freeze updates";
+});
+
 async function refreshState() {
+    if (frozen) return;
+
     try {
         const res = await fetch("/hexapod/api/state", { cache: "no-store" });
 
@@ -361,6 +399,7 @@ async function refreshState() {
         }
 
         const state = await res.json();
+        lastState = state;
         const telemetry = state.telemetry || {};
         const legs = state.legs || [];
 
@@ -390,4 +429,4 @@ async function refreshState() {
 
 refreshState();
 setInterval(refreshState, STATE_POLL_MS);
-window.addEventListener("resize", () => refreshState());
+window.addEventListener("resize", () => { if (!frozen) refreshState(); });
