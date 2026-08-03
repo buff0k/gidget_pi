@@ -44,7 +44,9 @@ voltage_sense = Analog(servo2040.SHARED_ADC, servo2040.VOLTAGE_GAIN)
 current_sense = Analog(servo2040.SHARED_ADC, servo2040.CURRENT_GAIN, servo2040.SHUNT_RESISTOR)
 adc_mux = AnalogMux(
     servo2040.ADC_ADDR_0, servo2040.ADC_ADDR_1, servo2040.ADC_ADDR_2,
-    muxed_pin=Analog(servo2040.SHARED_ADC),
+    # Raw pin constant, not an Analog(...) wrapper - AnalogMux calls .init()
+    # on this internally, which only a raw pin identifier supports.
+    muxed_pin=servo2040.SHARED_ADC,
 )
 
 cluster = ServoCluster(0, 0, list(range(servo2040.SERVO_1, servo2040.SERVO_18 + 1)))
