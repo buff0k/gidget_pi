@@ -251,7 +251,7 @@ fix_permissions() {
 update_hexapod_firmware() {
     log "Checking for a connected Servo 2040 to flash firmware onto"
 
-    if [ ! -x "${VENV_DIR}/bin/mpremote" ]; then
+    if ! "${VENV_DIR}/bin/python" -c "import mpremote" >/dev/null 2>&1; then
         log "mpremote not installed in venv - skipping Servo 2040 firmware flash"
         return
     fi
@@ -271,8 +271,8 @@ update_hexapod_firmware() {
 
     log "Flashing firmware/servo2040/main.py to Servo 2040 at ${port}"
 
-    if "${VENV_DIR}/bin/mpremote" connect "$port" cp "${REPO_DIR}/firmware/servo2040/main.py" :main.py; then
-        "${VENV_DIR}/bin/mpremote" connect "$port" reset || true
+    if "${VENV_DIR}/bin/python" -m mpremote connect "$port" cp "${REPO_DIR}/firmware/servo2040/main.py" :main.py; then
+        "${VENV_DIR}/bin/python" -m mpremote connect "$port" reset || true
         log "Servo 2040 firmware flashed"
     else
         log "WARNING: Servo 2040 firmware flash failed - board may need manual attention, see firmware/servo2040/README.md"
