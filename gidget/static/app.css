@@ -604,3 +604,28 @@ tbody tr:hover {
 .calib-table .assigned-badge {
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
+
+/* Press-and-hold Test buttons live inside a horizontally-scrollable
+   table (.table-scroll). Without this, a touch-and-hold on a Test button
+   can get reinterpreted by the browser as the start of a scroll gesture -
+   pointerdown fires but pointercancel follows almost immediately - which
+   is exactly what "doesn't reliably let me test" looks like. touch-action:
+   none stops the browser from claiming the gesture for panning/zooming;
+   taps and clicks are unaffected. */
+.calib-table button {
+    touch-action: none;
+}
+
+.issues-banner {
+    background: #3a1f1f;
+    border: 1px solid #a55;
+    border-radius: 8px;
+    padding: 0.6rem 0.8rem;
+    margin: 0.5rem 0;
+    font-size: 0.85rem;
+}
+
+.issues-banner ul {
+    margin: 0.3rem 0 0;
+    padding-left: 1.2rem;
+}

@@ -160,10 +160,15 @@ def api_command():
     return jsonify({"ok": True, "command": command})
 
 
+def _with_issues(data):
+    data["issues"] = hcal.channel_map_issues(data)
+    return data
+
+
 @blueprint.route("/api/calibration")
 @login_required
 def api_calibration():
-    return jsonify(hcal.load_calibration())
+    return jsonify(_with_issues(hcal.load_calibration()))
 
 
 @blueprint.route("/api/calibration/trim", methods=["POST"])
@@ -196,7 +201,7 @@ def api_calibration_trim():
     except (TypeError, ValueError):
         return jsonify({"ok": False, "error": "invalid trim value"}), 400
 
-    return jsonify({"ok": True, "calibration": result})
+    return jsonify({"ok": True, "calibration": _with_issues(result)})
 
 
 @blueprint.route("/api/calibration/channel_map", methods=["POST"])
@@ -229,4 +234,23 @@ def api_calibration_channel_map():
     except ValueError as e:
         return jsonify({"ok": False, "error": str(e)}), 400
 
-    return jsonify({"ok": True, "calibration": result})
+    return jsonify({"ok": True, "calibration": _with_issues(result)})
+
+
+@blueprint.route("/api/calibration/reset_channel_map", methods=["POST"])
+@login_required
+def api_calibration_reset_channel_map():
+    """
+    Restores the sequential placeholder channel map. Escape hatch for a map
+    that's ended up in a state the operator doesn't trust - e.g. leftover
+    corruption from testing before the swap-on-assign fix in
+    hexapod_calibration.py existed. Session-gated like the other
+    calibration writes.
+    """
+    data = request.get_json(silent=True) or {}
+
+    if data.get("session_id") != current_session_id():
+        return jsonify({"ok": False, "error": "session superseded - reload the page"}), 409
+
+    result = hcal.reset_channel_map()
+    return jsonify({"ok": True, "calibration": _with_issues(result)})

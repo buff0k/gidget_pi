@@ -20,7 +20,9 @@ high-frequency path, so plain-file writes here are fine, unlike the tmpfs
 state/command files).
 """
 
+import fcntl
 import json
+from contextlib import contextmanager
 from pathlib import Path
 
 from hexapod_kinematics import CHANNEL_COUNT, LEG_COUNT, JOINTS
@@ -28,6 +30,7 @@ from hexapod_kinematics import CHANNEL_COUNT, LEG_COUNT, JOINTS
 
 CONFIG_DIR = Path("/opt/gidget/config")
 CALIBRATION_FILE = CONFIG_DIR / "hexapod_calibration.json"
+LOCK_FILE = CONFIG_DIR / "hexapod_calibration.lock"
 
 # How far a single nudge/save may move a channel's trim from zero. Real
 # calibration trim is a few degrees at most (spline-tooth granularity on
@@ -58,6 +61,30 @@ def default_calibration():
         "channel_map": _default_channel_map(),
         "trim_deg": {str(ch): 0.0 for ch in range(CHANNEL_COUNT)},
     }
+
+
+@contextmanager
+def _locked():
+    """
+    Serializes the read-modify-write cycle in set_trim()/nudge_trim()/
+    set_channel_map_entry()/reset_channel_map() across concurrent requests.
+    Flask can serve more than one request at once (multiple threads or
+    worker processes); without this, two near-simultaneous assignments
+    each load() the same on-disk state, each compute their own swap
+    against it, and whichever writes second silently discards the first's
+    change. That's a real way the channel map could end up with two
+    channels claiming the same leg/joint despite set_channel_map_entry()'s
+    swap logic being correct for any single request in isolation - an
+    advisory file lock (not a Python-level lock, since a lock object
+    wouldn't be shared across worker processes) closes that window.
+    """
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    with open(LOCK_FILE, "a") as lock_handle:
+        fcntl.flock(lock_handle, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_handle, fcntl.LOCK_UN)
 
 
 def _write_atomic(data):
@@ -119,20 +146,22 @@ def load_calibration():
 
 def set_trim(channel, trim_deg):
     trim_deg = max(-MAX_TRIM_DEG, min(MAX_TRIM_DEG, float(trim_deg)))
-    data = load_calibration()
-    data["trim_deg"][str(int(channel))] = trim_deg
-    _write_atomic(data)
-    return data
+    with _locked():
+        data = load_calibration()
+        data["trim_deg"][str(int(channel))] = trim_deg
+        _write_atomic(data)
+        return data
 
 
 def nudge_trim(channel, delta_deg):
-    data = load_calibration()
-    key = str(int(channel))
-    current = float(data["trim_deg"].get(key, 0.0))
-    new_value = max(-MAX_TRIM_DEG, min(MAX_TRIM_DEG, current + float(delta_deg)))
-    data["trim_deg"][key] = new_value
-    _write_atomic(data)
-    return data
+    with _locked():
+        data = load_calibration()
+        key = str(int(channel))
+        current = float(data["trim_deg"].get(key, 0.0))
+        new_value = max(-MAX_TRIM_DEG, min(MAX_TRIM_DEG, current + float(delta_deg)))
+        data["trim_deg"][key] = new_value
+        _write_atomic(data)
+        return data
 
 
 def set_channel_map_entry(channel, leg, joint):
@@ -146,32 +175,83 @@ def set_channel_map_entry(channel, leg, joint):
     if not (0 <= channel < CHANNEL_COUNT):
         raise ValueError(f"invalid channel {channel!r}")
 
-    data = load_calibration()
-    channel_key = str(channel)
-    old_entry = data["channel_map"].get(channel_key)
+    with _locked():
+        data = load_calibration()
+        channel_key = str(channel)
+        old_entry = data["channel_map"].get(channel_key)
 
-    # Keep the map a complete bijection at all times - every leg/joint must
-    # always have exactly one channel. If another channel already owns the
-    # (leg, joint) being assigned here, give it this channel's OLD
-    # (leg, joint) instead of leaving that slot with no channel at all.
-    # An incomplete map used to crash hexapod_controller.py outright the
-    # moment a leg/joint was missing (angles_to_channels indexing straight
-    # into a dict with no fallback) - that crash looked like "lost
-    # connection to the board" from the web UI, with no obvious link back
-    # to the assignment that caused it. Swapping instead of orphaning fixes
-    # the root cause; angles_to_channels() below is also now defensive as a
-    # second layer, in case the file is ever hand-edited into a bad state.
-    for other_key, other_entry in data["channel_map"].items():
-        if other_key == channel_key:
-            continue
-        if other_entry.get("leg") == leg and other_entry.get("joint") == joint:
-            if old_entry is not None:
-                data["channel_map"][other_key] = old_entry
-            break
+        # Keep the map a complete bijection at all times - every leg/joint
+        # must always have exactly one channel. If another channel already
+        # owns the (leg, joint) being assigned here, give it this
+        # channel's OLD (leg, joint) instead of leaving that slot with no
+        # channel at all. An incomplete map used to crash
+        # hexapod_controller.py outright the moment a leg/joint was
+        # missing - that crash looked like "lost connection to the board"
+        # from the web UI, with no obvious link back to the assignment
+        # that caused it. Swapping instead of orphaning fixes the root
+        # cause; angles_to_channels() in hexapod_kinematics.py is also
+        # defensive as a second layer, in case the file is ever
+        # hand-edited into a bad state.
+        for other_key, other_entry in data["channel_map"].items():
+            if other_key == channel_key:
+                continue
+            if other_entry.get("leg") == leg and other_entry.get("joint") == joint:
+                if old_entry is not None:
+                    data["channel_map"][other_key] = old_entry
+                break
 
-    data["channel_map"][channel_key] = {"leg": leg, "joint": joint}
-    _write_atomic(data)
-    return data
+        data["channel_map"][channel_key] = {"leg": leg, "joint": joint}
+        _write_atomic(data)
+        return data
+
+
+def reset_channel_map():
+    """
+    Restores the sequential placeholder mapping - a clean-slate escape
+    hatch. The swap logic above keeps NEW assignments from corrupting the
+    map, but it can't retroactively repair a map that already ended up
+    with a gap or a duplicate before that logic existed (or from any other
+    cause) - this is the recovery path for that, independent of trim,
+    which is left untouched since it's a per-channel hardware fact,
+    unrelated to wiring.
+    """
+    with _locked():
+        data = load_calibration()
+        data["channel_map"] = _default_channel_map()
+        _write_atomic(data)
+        return data
+
+
+def channel_map_issues(data):
+    """
+    Human-readable problems with the current channel map: a leg/joint with
+    no channel assigned, or more than one channel claiming the same
+    leg/joint. The latter should be unreachable through
+    set_channel_map_entry()'s swap logic + _locked() above, but this reads
+    the raw stored map directly (not the already-collapsed
+    channel_map_by_leg(), which would silently hide a duplicate via
+    last-write-wins) specifically so a real problem - leftover corruption
+    from before this file's locking/swap fixes existed, or a hand-edited
+    config - is surfaced to the operator instead of silently patched over.
+    """
+    raw = data.get("channel_map", {})
+    owners = {}
+
+    for channel_str, entry in raw.items():
+        key = (entry.get("leg"), entry.get("joint"))
+        owners.setdefault(key, []).append(channel_str)
+
+    issues = []
+    for leg in range(LEG_COUNT):
+        for joint in JOINTS:
+            channels = owners.get((leg, joint), [])
+            if not channels:
+                issues.append(f"Leg {leg} {joint}: no channel assigned")
+            elif len(channels) > 1:
+                ch_list = ", ".join(sorted(channels, key=int))
+                issues.append(f"Leg {leg} {joint}: channels {ch_list} all claim it")
+
+    return issues
 
 
 def channel_map_by_leg(data):

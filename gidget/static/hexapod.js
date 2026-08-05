@@ -264,6 +264,8 @@ const calibStatus = document.getElementById("calibStatus");
 const trimTableBody = document.getElementById("trimTableBody");
 const mapTableBody = document.getElementById("mapTableBody");
 const mapStatus = document.getElementById("mapStatus");
+const mapIssues = document.getElementById("mapIssues");
+const mapResetBtn = document.getElementById("mapResetBtn");
 
 const LEG_COUNT = 6;
 const JOINT_NAMES = ["coxa", "femur", "tibia"];
@@ -404,6 +406,7 @@ async function assignChannel(channel) {
         // this one, from the server's actual resulting state.
         lastCalibration = body.calibration;
         renderMapTable();
+        renderMapIssues();
         mapStatus.textContent = `Assigned channel ${channel}`;
         setTimeout(() => { mapStatus.textContent = ""; }, 2000);
     } catch (e) {
@@ -490,6 +493,55 @@ function renderMapTable() {
     mapRowsSynced = true;
 }
 
+// Surfaces gaps/duplicates the server finds in the raw stored map (see
+// hexapod_calibration.channel_map_issues) - the swap-on-assign logic
+// should keep new edits from ever producing one, but this is what makes
+// leftover corruption (from before that fix existed, or a hand-edited
+// file) visible instead of silently patched over by the "missing channel
+// stays at safe neutral" fallback in hexapod_kinematics.angles_to_channels.
+function renderMapIssues() {
+    const issues = lastCalibration.issues || [];
+
+    if (!issues.length) {
+        mapIssues.style.display = "none";
+        mapIssues.innerHTML = "";
+        return;
+    }
+
+    mapIssues.style.display = "block";
+    const items = issues.map((issue) => `<li>${issue}</li>`).join("");
+    mapIssues.innerHTML = `<strong>Channel map has ${issues.length} problem(s):</strong><ul>${items}</ul>`;
+}
+
+mapResetBtn.addEventListener("click", async () => {
+    if (!window.confirm("Reset the channel map to the default sequential assignment? Trim values are kept.")) {
+        return;
+    }
+
+    try {
+        const res = await fetch("/hexapod/api/calibration/reset_channel_map", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ session_id: window.GIDGET_SESSION_ID }),
+        });
+        const body = await res.json();
+
+        if (!res.ok) {
+            mapStatus.textContent = body.error || "Reset failed";
+            return;
+        }
+
+        lastCalibration = body.calibration;
+        mapRowsSynced = false;
+        renderMapTable();
+        renderMapIssues();
+        mapStatus.textContent = "Channel map reset";
+        setTimeout(() => { mapStatus.textContent = ""; }, 2000);
+    } catch (e) {
+        mapStatus.textContent = "Reset failed - offline?";
+    }
+});
+
 buildMapTableSkeleton();
 
 async function fetchCalibration() {
@@ -500,6 +552,7 @@ async function fetchCalibration() {
         renderCalibDisplay();
         renderTrimTable();
         renderMapTable();
+        renderMapIssues();
     } catch (e) {
         // Best-effort - the next poll retries.
     }
