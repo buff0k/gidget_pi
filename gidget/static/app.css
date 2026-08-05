@@ -562,3 +562,45 @@ tbody tr:hover {
     width: 100%;
     margin: 0;
 }
+
+.table-scroll {
+    overflow-x: auto;
+}
+
+.calib-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+}
+
+.calib-table th,
+.calib-table td {
+    padding: 0.4rem 0.5rem;
+    border-bottom: 1px solid var(--line);
+    text-align: left;
+    white-space: nowrap;
+}
+
+.calib-table th {
+    color: var(--muted);
+    font-size: 0.75rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.calib-table tr:hover td {
+    background: var(--panel2);
+}
+
+.calib-table select {
+    padding: 0.2rem;
+}
+
+.calib-table button {
+    padding: 0.3rem 0.5rem;
+    font-size: 0.8rem;
+}
+
+.calib-table .assigned-badge {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}

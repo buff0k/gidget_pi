@@ -190,6 +190,7 @@ def leg_state_payload(leg_xyz, angles, channels, mode, gait, fast, malformed_lin
     for leg in range(hk.LEG_COUNT):
         x, y, z = leg_xyz[leg]
         coxa, femur, tibia = angles[leg]
+        femur_pivot, tibia_pivot = hk.leg_joint_positions(x, y, z)
         legs.append({
             "index": leg,
             # Coxa-relative (matches the reference sketch's coordinate frame).
@@ -197,9 +198,17 @@ def leg_state_payload(leg_xyz, angles, channels, mode, gait, fast, malformed_lin
             "y": round(y, 1),
             "z": round(z, 1),
             # Body-center-relative - what the web visualizer draws, so it
-            # doesn't need to know BODY_X/BODY_Y itself.
+            # doesn't need to know BODY_X/BODY_Y itself. Four points per leg
+            # (mount, femur pivot, tibia pivot, toe) so the visualizer can
+            # draw the coxa/femur/tibia segments as three distinct lines
+            # instead of one straight mount-to-toe abstraction - see
+            # hk.leg_joint_positions().
             "mount_x": hk.BODY_X[leg],
             "mount_y": hk.BODY_Y[leg],
+            "femur_pivot_x": round(hk.BODY_X[leg] + femur_pivot[0], 1),
+            "femur_pivot_y": round(hk.BODY_Y[leg] + femur_pivot[1], 1),
+            "tibia_pivot_x": round(hk.BODY_X[leg] + tibia_pivot[0], 1),
+            "tibia_pivot_y": round(hk.BODY_Y[leg] + tibia_pivot[1], 1),
             "toe_x": round(hk.BODY_X[leg] + x, 1),
             "toe_y": round(hk.BODY_Y[leg] + y, 1),
             "coxa_deg": round(coxa, 1),

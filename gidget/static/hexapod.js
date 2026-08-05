@@ -261,20 +261,28 @@ function syncManualChannelsFromState(channels) {
 const calibChannelSelect = document.getElementById("calibChannelSelect");
 const calibTrimValue = document.getElementById("calibTrimValue");
 const calibStatus = document.getElementById("calibStatus");
-
-const mapChannelSelect = document.getElementById("mapChannelSelect");
-const mapCurrentAssignment = document.getElementById("mapCurrentAssignment");
-const mapLegSelect = document.getElementById("mapLegSelect");
-const mapJointSelect = document.getElementById("mapJointSelect");
-const mapTestBtn = document.getElementById("mapTestBtn");
-const mapAssignBtn = document.getElementById("mapAssignBtn");
+const trimTableBody = document.getElementById("trimTableBody");
+const mapTableBody = document.getElementById("mapTableBody");
 const mapStatus = document.getElementById("mapStatus");
 
+const LEG_COUNT = 6;
+const JOINT_NAMES = ["coxa", "femur", "tibia"];
+
 let lastCalibration = { channel_map: {}, trim_deg: {} };
-// {channel, offset} while mapTestBtn is held - read by
+// {channel, offset} while a row's Test button is held - read by
 // buildManualChannelsForSend() in the heartbeat below.
 let testChannelOverride = null;
 let modeBeforeTest = null;
+// Only sync the mapping table's leg/joint <select> values to the server's
+// current assignment once, on the first successful fetch - after that they
+// are pure input for the next Assign click. Otherwise a background poll
+// mid-edit would silently snap a dropdown back under the operator's hand.
+let mapRowsSynced = false;
+
+function jointLabel(joint) {
+    if (!joint) return "n/a";
+    return joint.charAt(0).toUpperCase() + joint.slice(1);
+}
 
 function populateChannelSelect(select) {
     for (let i = 0; i < CHANNEL_COUNT; i++) {
@@ -286,36 +294,40 @@ function populateChannelSelect(select) {
 }
 
 populateChannelSelect(calibChannelSelect);
-populateChannelSelect(mapChannelSelect);
 
-function jointLabel(joint) {
-    if (!joint) return "n/a";
-    return joint.charAt(0).toUpperCase() + joint.slice(1);
-}
+// ---- Calibration: single-channel nudge + all-channel trim summary ----
 
-function renderCalibrationDisplays() {
+function renderCalibDisplay() {
     const trim = (lastCalibration.trim_deg || {})[calibChannelSelect.value];
     calibTrimValue.textContent = trim === undefined ? "n/a" : `${Number(trim).toFixed(1)}°`;
-
-    const entry = (lastCalibration.channel_map || {})[mapChannelSelect.value];
-    mapCurrentAssignment.textContent = entry
-        ? `Leg ${entry.leg} / ${jointLabel(entry.joint)}`
-        : "n/a";
 }
 
-async function fetchCalibration() {
-    try {
-        const res = await fetch("/hexapod/api/calibration", { cache: "no-store" });
-        if (!res.ok) return;
-        lastCalibration = await res.json();
-        renderCalibrationDisplays();
-    } catch (e) {
-        // Best-effort - the next poll retries.
+function renderTrimTable() {
+    const trimDeg = lastCalibration.trim_deg || {};
+    trimTableBody.innerHTML = "";
+
+    for (let row = 0; row < CHANNEL_COUNT / 3; row++) {
+        const tr = document.createElement("tr");
+
+        for (let col = 0; col < 3; col++) {
+            const ch = row * 3 + col;
+            const chTd = document.createElement("td");
+            chTd.textContent = String(ch);
+
+            const trimTd = document.createElement("td");
+            const trim = trimDeg[String(ch)];
+            trimTd.className = "assigned-badge";
+            trimTd.textContent = trim === undefined ? "n/a" : `${Number(trim).toFixed(1)}°`;
+
+            tr.appendChild(chTd);
+            tr.appendChild(trimTd);
+        }
+
+        trimTableBody.appendChild(tr);
     }
 }
 
-calibChannelSelect.addEventListener("change", renderCalibrationDisplays);
-mapChannelSelect.addEventListener("change", renderCalibrationDisplays);
+calibChannelSelect.addEventListener("change", renderCalibDisplay);
 
 async function nudgeTrim(delta) {
     const channel = Number(calibChannelSelect.value);
@@ -334,7 +346,8 @@ async function nudgeTrim(delta) {
         }
 
         lastCalibration = body.calibration;
-        renderCalibrationDisplays();
+        renderCalibDisplay();
+        renderTrimTable();
         calibStatus.textContent = "Saved";
         setTimeout(() => { calibStatus.textContent = ""; }, 1500);
     } catch (e) {
@@ -347,14 +360,16 @@ document.getElementById("calibNudgeMinus1").addEventListener("click", () => nudg
 document.getElementById("calibNudgePlus1").addEventListener("click", () => nudgeTrim(1));
 document.getElementById("calibNudgePlus5").addEventListener("click", () => nudgeTrim(5));
 
-// Borrows Manual mode to move exactly the selected channel a bounded
-// amount away from its current position and back, so the operator can
-// watch which physical joint responds. No direct serial write happens
-// here - it only sets state the next heartbeat tick picks up.
-function startChannelTest() {
+// ---- Channel Mapping: all 18 channels in one table ----
+
+// Borrows Manual mode to move exactly one channel a bounded amount away
+// from its current position and back, so the operator can watch which
+// physical joint responds. No direct serial write happens here - it only
+// sets state the next heartbeat tick picks up (see buildManualChannelsForSend).
+function startChannelTest(channel) {
     modeBeforeTest = modeSelect.value;
     modeSelect.value = "manual";
-    testChannelOverride = { channel: Number(mapChannelSelect.value), offset: 25 };
+    testChannelOverride = { channel, offset: 25 };
 }
 
 function stopChannelTest() {
@@ -365,12 +380,11 @@ function stopChannelTest() {
     }
 }
 
-bindHoldButton(mapTestBtn, startChannelTest, stopChannelTest);
-
-mapAssignBtn.addEventListener("click", async () => {
-    const channel = Number(mapChannelSelect.value);
-    const leg = Number(mapLegSelect.value);
-    const joint = mapJointSelect.value;
+async function assignChannel(channel) {
+    const legSelect = document.getElementById(`mapLeg${channel}`);
+    const jointSelect = document.getElementById(`mapJoint${channel}`);
+    const leg = Number(legSelect.value);
+    const joint = jointSelect.value;
 
     try {
         const res = await fetch("/hexapod/api/calibration/channel_map", {
@@ -385,14 +399,111 @@ mapAssignBtn.addEventListener("click", async () => {
             return;
         }
 
+        // A collision swap (see hexapod_calibration.py) may have moved a
+        // DIFFERENT channel too - re-render every row's badge, not just
+        // this one, from the server's actual resulting state.
         lastCalibration = body.calibration;
-        renderCalibrationDisplays();
-        mapStatus.textContent = "Assigned";
-        setTimeout(() => { mapStatus.textContent = ""; }, 1500);
+        renderMapTable();
+        mapStatus.textContent = `Assigned channel ${channel}`;
+        setTimeout(() => { mapStatus.textContent = ""; }, 2000);
     } catch (e) {
         mapStatus.textContent = "Assign failed - offline?";
     }
-});
+}
+
+function buildMapTableSkeleton() {
+    for (let ch = 0; ch < CHANNEL_COUNT; ch++) {
+        const tr = document.createElement("tr");
+
+        const chTd = document.createElement("td");
+        chTd.textContent = String(ch);
+
+        const assignedTd = document.createElement("td");
+        assignedTd.id = `mapAssigned${ch}`;
+        assignedTd.className = "assigned-badge";
+        assignedTd.textContent = "n/a";
+
+        const testTd = document.createElement("td");
+        const testBtn = document.createElement("button");
+        testBtn.type = "button";
+        testBtn.textContent = "Test";
+        bindHoldButton(testBtn, () => startChannelTest(ch), stopChannelTest);
+        testTd.appendChild(testBtn);
+
+        const legTd = document.createElement("td");
+        const legSelect = document.createElement("select");
+        legSelect.id = `mapLeg${ch}`;
+        for (let leg = 0; leg < LEG_COUNT; leg++) {
+            const opt = document.createElement("option");
+            opt.value = String(leg);
+            opt.textContent = `Leg ${leg}`;
+            legSelect.appendChild(opt);
+        }
+        legTd.appendChild(legSelect);
+
+        const jointTd = document.createElement("td");
+        const jointSelect = document.createElement("select");
+        jointSelect.id = `mapJoint${ch}`;
+        JOINT_NAMES.forEach((joint) => {
+            const opt = document.createElement("option");
+            opt.value = joint;
+            opt.textContent = jointLabel(joint);
+            jointSelect.appendChild(opt);
+        });
+        jointTd.appendChild(jointSelect);
+
+        const assignTd = document.createElement("td");
+        const assignBtn = document.createElement("button");
+        assignBtn.type = "button";
+        assignBtn.textContent = "Assign";
+        assignBtn.addEventListener("click", () => assignChannel(ch));
+        assignTd.appendChild(assignBtn);
+
+        tr.appendChild(chTd);
+        tr.appendChild(assignedTd);
+        tr.appendChild(testTd);
+        tr.appendChild(legTd);
+        tr.appendChild(jointTd);
+        tr.appendChild(assignTd);
+        mapTableBody.appendChild(tr);
+    }
+}
+
+function renderMapTable() {
+    const channelMap = lastCalibration.channel_map || {};
+
+    for (let ch = 0; ch < CHANNEL_COUNT; ch++) {
+        const entry = channelMap[String(ch)];
+        const badge = document.getElementById(`mapAssigned${ch}`);
+        if (badge) {
+            badge.textContent = entry ? `L${entry.leg} ${jointLabel(entry.joint)}` : "unassigned";
+        }
+
+        if (!mapRowsSynced && entry) {
+            const legSelect = document.getElementById(`mapLeg${ch}`);
+            const jointSelect = document.getElementById(`mapJoint${ch}`);
+            if (legSelect) legSelect.value = String(entry.leg);
+            if (jointSelect) jointSelect.value = entry.joint;
+        }
+    }
+
+    mapRowsSynced = true;
+}
+
+buildMapTableSkeleton();
+
+async function fetchCalibration() {
+    try {
+        const res = await fetch("/hexapod/api/calibration", { cache: "no-store" });
+        if (!res.ok) return;
+        lastCalibration = await res.json();
+        renderCalibDisplay();
+        renderTrimTable();
+        renderMapTable();
+    } catch (e) {
+        // Best-effort - the next poll retries.
+    }
+}
 
 fetchCalibration();
 setInterval(fetchCalibration, STATE_POLL_MS);
@@ -495,10 +606,17 @@ function drawLegs(legs) {
         return;
     }
 
-    // Auto-scale mm -> px from the furthest toe/mount point, with padding.
+    // Auto-scale mm -> px from the furthest point of any leg, with padding.
+    // Includes the knee/hip pivots, not just mount/toe - a bent leg's knee
+    // can swing wider than a straight line from mount to toe would suggest.
     let maxExtent = 50;
     legs.forEach((leg) => {
-        maxExtent = Math.max(maxExtent, Math.abs(leg.mount_x), Math.abs(leg.mount_y), Math.abs(leg.toe_x), Math.abs(leg.toe_y));
+        [leg.mount_x, leg.femur_pivot_x, leg.tibia_pivot_x, leg.toe_x].forEach((v) => {
+            maxExtent = Math.max(maxExtent, Math.abs(v));
+        });
+        [leg.mount_y, leg.femur_pivot_y, leg.tibia_pivot_y, leg.toe_y].forEach((v) => {
+            maxExtent = Math.max(maxExtent, Math.abs(v));
+        });
     });
     const padding = 60;
     const scale = (Math.min(width, height) / 2 - padding) / maxExtent;
@@ -521,21 +639,61 @@ function drawLegs(legs) {
     legCtx.closePath();
     legCtx.stroke();
 
-    // Each leg: mount point -> toe position.
+    // Each leg drawn as three real segments (coxa/femur/tibia), not one
+    // straight mount-to-toe line - the old single-line abstraction is
+    // exactly why "which segment is which joint" was impossible to tell
+    // at a glance. Each segment gets its own color plus a channel-number
+    // label, using the same channel map the controller actually commands
+    // (leg.channels), so the diagram and the hardware can never disagree
+    // about which channel drives what.
+    const JOINT_STYLE = {
+        coxa: { color: "#ff9f4d", short: "C" },
+        femur: { color: "#80c7ff", short: "F" },
+        tibia: { color: "#8dffb0", short: "T" },
+    };
+
+    function drawSegment(x1, y1, x2, y2, joint, channel) {
+        const style = JOINT_STYLE[joint];
+        legCtx.strokeStyle = style.color;
+        legCtx.lineWidth = 3;
+        legCtx.beginPath();
+        legCtx.moveTo(x1, y1);
+        legCtx.lineTo(x2, y2);
+        legCtx.stroke();
+
+        const midX = (x1 + x2) / 2;
+        const midY = (y1 + y2) / 2;
+        const label = channel === undefined || channel === null
+            ? `${style.short}?`
+            : `${style.short}${channel}`;
+
+        legCtx.fillStyle = style.color;
+        legCtx.font = "9px monospace";
+        legCtx.textAlign = "center";
+        legCtx.fillText(label, midX, midY - 4);
+    }
+
     legs.forEach((leg) => {
         const [mx, my] = toScreen(leg.mount_x, leg.mount_y);
+        const [fx, fy] = toScreen(leg.femur_pivot_x, leg.femur_pivot_y);
+        const [kx, ky] = toScreen(leg.tibia_pivot_x, leg.tibia_pivot_y);
         const [tx, ty] = toScreen(leg.toe_x, leg.toe_y);
+        const chans = leg.channels || {};
 
-        legCtx.strokeStyle = "#80c7ff";
-        legCtx.lineWidth = 2;
-        legCtx.beginPath();
-        legCtx.moveTo(mx, my);
-        legCtx.lineTo(tx, ty);
-        legCtx.stroke();
+        drawSegment(mx, my, fx, fy, "coxa", chans.coxa);
+        drawSegment(fx, fy, kx, ky, "femur", chans.femur);
+        drawSegment(kx, ky, tx, ty, "tibia", chans.tibia);
 
         legCtx.beginPath();
         legCtx.arc(mx, my, 4, 0, Math.PI * 2);
         legCtx.fillStyle = "#666";
+        legCtx.fill();
+
+        // Knee (femur/tibia joint) - small dot so the bend is visible even
+        // when the two segments are nearly in line.
+        legCtx.beginPath();
+        legCtx.arc(kx, ky, 3, 0, Math.PI * 2);
+        legCtx.fillStyle = "#999";
         legCtx.fill();
 
         // Toe height (Z) hinted by dot size - smaller/dimmer means the
@@ -548,10 +706,10 @@ function drawLegs(legs) {
         legCtx.fillStyle = lifted > 5 ? "#ffd36e" : "#80ff9f";
         legCtx.fill();
 
-        legCtx.fillStyle = "#777";
-        legCtx.font = "11px monospace";
+        legCtx.fillStyle = "#ccc";
+        legCtx.font = "bold 11px monospace";
         legCtx.textAlign = "center";
-        legCtx.fillText(String(leg.index), tx, ty - 10);
+        legCtx.fillText(`L${leg.index}`, mx, my - 12);
     });
 
     // Forward-direction marker.

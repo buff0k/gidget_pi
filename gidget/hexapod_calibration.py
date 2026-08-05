@@ -147,7 +147,29 @@ def set_channel_map_entry(channel, leg, joint):
         raise ValueError(f"invalid channel {channel!r}")
 
     data = load_calibration()
-    data["channel_map"][str(channel)] = {"leg": leg, "joint": joint}
+    channel_key = str(channel)
+    old_entry = data["channel_map"].get(channel_key)
+
+    # Keep the map a complete bijection at all times - every leg/joint must
+    # always have exactly one channel. If another channel already owns the
+    # (leg, joint) being assigned here, give it this channel's OLD
+    # (leg, joint) instead of leaving that slot with no channel at all.
+    # An incomplete map used to crash hexapod_controller.py outright the
+    # moment a leg/joint was missing (angles_to_channels indexing straight
+    # into a dict with no fallback) - that crash looked like "lost
+    # connection to the board" from the web UI, with no obvious link back
+    # to the assignment that caused it. Swapping instead of orphaning fixes
+    # the root cause; angles_to_channels() below is also now defensive as a
+    # second layer, in case the file is ever hand-edited into a bad state.
+    for other_key, other_entry in data["channel_map"].items():
+        if other_key == channel_key:
+            continue
+        if other_entry.get("leg") == leg and other_entry.get("joint") == joint:
+            if old_entry is not None:
+                data["channel_map"][other_key] = old_entry
+            break
+
+    data["channel_map"][channel_key] = {"leg": leg, "joint": joint}
     _write_atomic(data)
     return data
 
@@ -157,13 +179,18 @@ def channel_map_by_leg(data):
     {leg: {joint: channel}} - the shape hexapod_kinematics.angles_to_channels
     actually consumes, derived from the stored {channel: {leg, joint}} shape
     (which is what the Channel Mapping panel naturally edits, one channel
-    at a time).
+    at a time). Skips (rather than raises on) any entry with a leg/joint
+    outside the valid range - defensive against a hand-edited config file,
+    even though set_channel_map_entry() above never produces one.
     """
     result = {leg: {} for leg in range(LEG_COUNT)}
-    for channel_str, entry in data["channel_map"].items():
-        result[entry["leg"]][entry["joint"]] = int(channel_str)
+    for channel_str, entry in data.get("channel_map", {}).items():
+        leg = entry.get("leg")
+        joint = entry.get("joint")
+        if leg in result and joint in JOINTS:
+            result[leg][joint] = int(channel_str)
     return result
 
 
 def trim_by_channel(data):
-    return {int(ch): float(v) for ch, v in data["trim_deg"].items()}
+    return {int(ch): float(v) for ch, v in data.get("trim_deg", {}).items()}

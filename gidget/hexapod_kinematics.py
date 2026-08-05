@@ -73,13 +73,17 @@ def clamp(value, lo, hi):
     return max(lo, min(hi, value))
 
 
-def leg_ik(leg_number, x, y, z):
+def _solve_leg(x, y, z):
     """
-    Solve one leg's coxa/femur/tibia angles (degrees) for a target
-    coxa-to-toe position (x, y, z), mm.
+    Shared trig core for leg_ik() and leg_joint_positions() - both derive
+    from the exact same 2-link (femur/tibia) planar solve within the
+    vertical plane defined by the coxa's horizontal bearing, so the
+    visualizer's drawn joint positions can never drift out of sync with
+    the angles actually being commanded to the servos (they're computed
+    from the literal same intermediate values, not a separately-derived
+    inverse that could disagree).
 
-    Returns None if the target is out of reach (matches the reference
-    sketch's silent skip - caller should hold the leg's previous angles).
+    Returns None if unreachable (mirrors leg_ik's silent-skip contract).
     """
     l0 = math.sqrt((x * x) + (y * y)) - COXA_LENGTH
     l3 = math.sqrt((l0 * l0) + (z * z))
@@ -91,20 +95,92 @@ def leg_ik(leg_number, x, y, z):
         ((FEMUR_LENGTH ** 2) + (TIBIA_LENGTH ** 2) - (l3 ** 2))
         / (2 * FEMUR_LENGTH * TIBIA_LENGTH)
     )
-    theta_tibia = clamp(math.degrees(phi_tibia) - 23.0, 0.0, 180.0)
-
     gamma_femur = math.atan2(z, l0)
     phi_femur = math.acos(
         ((FEMUR_LENGTH ** 2) + (l3 ** 2) - (TIBIA_LENGTH ** 2))
         / (2 * FEMUR_LENGTH * l3)
     )
-    theta_femur = clamp(math.degrees(phi_femur + gamma_femur) + 14.0 + 90.0, 0.0, 180.0)
+    # Coxa's horizontal bearing toward the toe - x is forward, y is right,
+    # matching atan2(x, y) elsewhere in this module (0 deg = +Y/right,
+    # 90 deg = +X/forward).
+    theta_h = math.atan2(x, y)
 
-    theta_coxa = math.degrees(math.atan2(x, y))
+    return {
+        "gamma_femur": gamma_femur,
+        "phi_femur": phi_femur,
+        "phi_tibia": phi_tibia,
+        "theta_h": theta_h,
+    }
+
+
+def leg_ik(leg_number, x, y, z):
+    """
+    Solve one leg's coxa/femur/tibia angles (degrees) for a target
+    coxa-to-toe position (x, y, z), mm.
+
+    Returns None if the target is out of reach (matches the reference
+    sketch's silent skip - caller should hold the leg's previous angles).
+    """
+    solved = _solve_leg(x, y, z)
+    if solved is None:
+        return None
+
+    theta_tibia = clamp(math.degrees(solved["phi_tibia"]) - 23.0, 0.0, 180.0)
+    theta_femur = clamp(
+        math.degrees(solved["phi_femur"] + solved["gamma_femur"]) + 14.0 + 90.0, 0.0, 180.0
+    )
+
+    theta_coxa = math.degrees(solved["theta_h"])
     theta_coxa = _apply_coxa_mount_offset(leg_number, theta_coxa)
     theta_coxa = clamp(theta_coxa, 0.0, 180.0)
 
     return theta_coxa, theta_femur, theta_tibia
+
+
+def leg_joint_positions(x, y, z):
+    """
+    Coxa-relative (femur_pivot_xyz, tibia_pivot_xyz) for the same target
+    leg_ik() would solve - the "knee" and "hip" points a visualizer needs
+    to draw three real segments (coxa/femur/tibia) instead of one straight
+    mount-to-toe line. Derived from the exact same _solve_leg() trig
+    leg_ik() uses, so these positions are always geometrically consistent
+    with the angles actually being commanded.
+
+    Never raises: falls back to points along the direct mount-to-toe line
+    if the target is unreachable, since a slightly-approximate diagram
+    beats a frozen or crashed one - unlike leg_ik(), nothing here gets
+    sent to a servo.
+    """
+    solved = _solve_leg(x, y, z)
+
+    if solved is None:
+        frac_femur = FEMUR_LENGTH / (FEMUR_LENGTH + TIBIA_LENGTH)
+        femur_pivot = (0.0, 0.0, 0.0)
+        tibia_pivot = (x * frac_femur, y * frac_femur, z * frac_femur)
+        return femur_pivot, tibia_pivot
+
+    theta_h = solved["theta_h"]
+    femur_pivot = (
+        COXA_LENGTH * math.sin(theta_h),
+        COXA_LENGTH * math.cos(theta_h),
+        0.0,
+    )
+
+    # Femur's actual elevation above the horizontal (theta_h) plane - the
+    # same phi_femur + gamma_femur term leg_ik() converts into a servo
+    # angle via its +14+90 offset; here it's used directly as a geometric
+    # angle instead.
+    femur_elevation = solved["gamma_femur"] + solved["phi_femur"]
+    horiz_extra = FEMUR_LENGTH * math.cos(femur_elevation)
+    vertical_extra = FEMUR_LENGTH * math.sin(femur_elevation)
+
+    tibia_pivot = (
+        femur_pivot[0] + horiz_extra * math.sin(theta_h),
+        femur_pivot[1] + horiz_extra * math.cos(theta_h),
+        femur_pivot[2] + vertical_extra,
+    )
+
+    return femur_pivot, tibia_pivot
 
 
 def _apply_coxa_mount_offset(leg_number, theta_coxa):
@@ -392,14 +468,23 @@ def angles_to_channels(angles, channel_map_by_leg):
     see hexapod_calibration.channel_map_by_leg(). No module-level default:
     the channel map is a hardware fact about this specific robot's wiring,
     discovered by hand, not something this pure-math module should guess at.
+
+    Missing leg/joint entries are skipped, not raised on - that channel
+    just keeps the safe 90 default below. hexapod_calibration.py's
+    set_channel_map_entry() is written to never produce a map with a gap,
+    but this is the layer that has to actually hold if it ever does: an
+    IndexError/KeyError here used to take down the whole controller tick
+    loop, which looked like "lost connection to the board" from the web UI
+    with no obvious link back to whatever calibration edit caused it.
     """
     channels = [90.0] * CHANNEL_COUNT
 
     for leg, (coxa, femur, tibia) in angles.items():
-        mapping = channel_map_by_leg[leg]
-        channels[mapping["coxa"]] = coxa
-        channels[mapping["femur"]] = femur
-        channels[mapping["tibia"]] = tibia
+        mapping = channel_map_by_leg.get(leg, {})
+        for joint, value in zip(JOINTS, (coxa, femur, tibia)):
+            channel = mapping.get(joint)
+            if channel is not None and 0 <= channel < CHANNEL_COUNT:
+                channels[channel] = value
 
     return channels
 
@@ -438,9 +523,21 @@ if __name__ == "__main__":
         angles = leg_angles_for_frame(leg_xyz)
         channels = angles_to_channels(angles, demo_channel_map)
         assert len(channels) == CHANNEL_COUNT
-        print(f"{gait_name}: leg0 xyz={leg_xyz[0]} angles={angles[0]}")
+        femur_pivot, tibia_pivot = leg_joint_positions(*leg_xyz[0])
+        print(f"{gait_name}: leg0 xyz={leg_xyz[0]} angles={angles[0]} "
+              f"femur_pivot={femur_pivot} tibia_pivot={tibia_pivot}")
 
     print("set_all_90:", set_all_90()[0])
     print("angles_to_channels demo:", angles_to_channels(set_all_90(), demo_channel_map)[:3])
     print("apply_trim demo:", apply_trim([90.0] * CHANNEL_COUNT, {0: 3.5, 4: -2.0}))
+
+    # angles_to_channels must survive a gap (e.g. mid-reassignment in the
+    # Channel Mapping UI) instead of raising - see the KeyError bug this
+    # was written to fix.
+    incomplete_map = {leg: {} for leg in range(LEG_COUNT)}
+    incomplete_map[0] = {"coxa": 0}  # femur/tibia missing entirely
+    gapped = angles_to_channels(set_all_90(), incomplete_map)
+    assert len(gapped) == CHANNEL_COUNT
+    print("angles_to_channels survives a gap:", gapped[:3])
+
     print("OK")
