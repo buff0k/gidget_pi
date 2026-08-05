@@ -48,6 +48,15 @@ TELEMETRY_STALE_SECONDS = 3.0
 # 20Hz on the wire is still smooth enough for servo motion.
 SERIAL_SEND_INTERVAL_SECONDS = 0.05
 
+# Calibrated neutral: 90 deg plus each servo's small per-joint trim
+# (COXA_CAL/FEMUR_CAL/TIBIA_CAL, a few degrees at most), NOT a flat 90 for
+# every channel. Flat 90 is close enough to "neutral" to be safe, but it is
+# not each servo's true calibrated center, which is what idle/manual should
+# rest at when nothing else is commanding the leg. This is distinct from the
+# home-stance danger below: home-stance angles are tens of degrees off
+# center (e.g. femur=146), calibration trim is single digits.
+NEUTRAL_CHANNELS = hk.angles_to_channels(hk.set_all_90())
+
 _shutdown_requested = False
 
 
@@ -265,7 +274,7 @@ def main():
                         if isinstance(manual_channels, list) and len(manual_channels) == 18:
                             channels = [hk.clamp(float(v), 0.0, 180.0) for v in manual_channels]
                         else:
-                            channels = [90.0] * 18
+                            channels = list(NEUTRAL_CHANNELS)
                     elif mode == "walk":
                         leg_xyz = hk.step_gait(gait_state, commanded_x, commanded_y, commanded_r, fast)
                         angles = hk.leg_angles_for_frame(leg_xyz, previous_angles)
@@ -273,16 +282,18 @@ def main():
                     else:
                         # "idle" (and any unrecognized mode, including the
                         # stale-command fallback in read_command()) is a
-                        # true raw-neutral state - NOT the IK-computed home
-                        # stance. That distinction matters: home-stance
+                        # true calibrated-neutral state - NOT the IK-computed
+                        # home stance. That distinction matters: home-stance
                         # joint angles (visible earlier as e.g. femur=146,
                         # tibia=35) are only safe once servo horns are
                         # physically calibrated against a known 90 deg
                         # reference. Idle must never depend on that having
-                        # happened yet.
+                        # happened yet - but it should still rest at each
+                        # servo's small per-joint trim (NEUTRAL_CHANNELS),
+                        # not an untrimmed flat 90 for every channel.
                         angles = previous_angles
                         leg_xyz = gait_state.leg_xyz
-                        channels = [90.0] * 18
+                        channels = list(NEUTRAL_CHANNELS)
 
                     previous_angles = angles
 
