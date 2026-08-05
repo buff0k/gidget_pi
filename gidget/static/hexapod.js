@@ -366,19 +366,56 @@ document.getElementById("calibNudgePlus5").addEventListener("click", () => nudge
 
 // Borrows Manual mode to move exactly one channel a bounded amount away
 // from its current position and back, so the operator can watch which
-// physical joint responds. No direct serial write happens here - it only
-// sets state the next heartbeat tick picks up (see buildManualChannelsForSend).
+// physical joint responds.
+//
+// Two things had to be fixed here beyond the basic press/release: (1) the
+// heartbeat only fires every HEARTBEAT_MS (200ms) - a quick tap could start
+// AND end entirely between two ticks, so the override was never actually
+// sent at all. Fixed by calling sendCommand() immediately on press and on
+// release instead of only relying on the timer. (2) even with an immediate
+// send, a fast tap barely moves the servo before reverting it - fixed with
+// a minimum hold duration, so release only takes effect once at least
+// MIN_TEST_HOLD_MS has passed since the press (a genuinely long hold is
+// unaffected - it already exceeds that by the time you let go).
+const MIN_TEST_HOLD_MS = 350;
+let testHoldTimer = null;
+let testStartedAt = 0;
+
 function startChannelTest(channel) {
-    modeBeforeTest = modeSelect.value;
+    if (testHoldTimer) {
+        clearTimeout(testHoldTimer);
+        testHoldTimer = null;
+    }
+    // If a previous test's minimum-hold timer hasn't fired yet, keep the
+    // ORIGINAL pre-test mode rather than capturing "manual" as it.
+    if (modeBeforeTest === null) {
+        modeBeforeTest = modeSelect.value;
+    }
     modeSelect.value = "manual";
     testChannelOverride = { channel, offset: 25 };
+    testStartedAt = Date.now();
+    sendCommand();
 }
 
-function stopChannelTest() {
+function finishChannelTest() {
     testChannelOverride = null;
     if (modeBeforeTest !== null) {
         modeSelect.value = modeBeforeTest;
         modeBeforeTest = null;
+    }
+    sendCommand();
+}
+
+function stopChannelTest() {
+    const remaining = MIN_TEST_HOLD_MS - (Date.now() - testStartedAt);
+
+    if (remaining <= 0) {
+        finishChannelTest();
+    } else {
+        testHoldTimer = setTimeout(() => {
+            testHoldTimer = null;
+            finishChannelTest();
+        }, remaining);
     }
 }
 
@@ -656,7 +693,7 @@ function drawLegs(legs) {
         legCtx.font = "16px monospace";
         legCtx.textAlign = "left";
         legCtx.fillText("Waiting for hexapod state...", 20, cy);
-        return;
+        return [];
     }
 
     // Auto-scale mm -> px from the furthest point of any leg, with padding.
@@ -726,6 +763,8 @@ function drawLegs(legs) {
         legCtx.fillText(label, midX, midY - 4);
     }
 
+    const unreachableLegs = [];
+
     legs.forEach((leg) => {
         const [mx, my] = toScreen(leg.mount_x, leg.mount_y);
         const [fx, fy] = toScreen(leg.femur_pivot_x, leg.femur_pivot_y);
@@ -736,6 +775,23 @@ function drawLegs(legs) {
         drawSegment(mx, my, fx, fy, "coxa", chans.coxa);
         drawSegment(fx, fy, kx, ky, "femur", chans.femur);
         drawSegment(kx, ky, tx, ty, "tibia", chans.tibia);
+
+        // leg.reachable is false only in "walk", when this tick's target
+        // was out of physical reach and the angles being sent are a stale
+        // hold-over, not a live solve - see leg_angles_for_frame() in
+        // hexapod_kinematics.py. A ring around the toe makes "this leg has
+        // silently stopped moving" visible instead of indistinguishable
+        // from normal stillness.
+        if (leg.reachable === false) {
+            unreachableLegs.push(leg.index);
+            legCtx.beginPath();
+            legCtx.arc(tx, ty, 12, 0, Math.PI * 2);
+            legCtx.strokeStyle = "#ff4444";
+            legCtx.lineWidth = 2;
+            legCtx.setLineDash([3, 3]);
+            legCtx.stroke();
+            legCtx.setLineDash([]);
+        }
 
         legCtx.beginPath();
         legCtx.arc(mx, my, 4, 0, Math.PI * 2);
@@ -770,6 +826,8 @@ function drawLegs(legs) {
     legCtx.font = "12px monospace";
     legCtx.textAlign = "center";
     legCtx.fillText("FWD ↑", cx, 20);
+
+    return unreachableLegs;
 }
 
 
@@ -839,9 +897,12 @@ async function refreshState() {
 
         syncManualChannelsFromState(state.channels);
 
-        drawLegs(legs);
+        const unreachableLegs = drawLegs(legs);
+        const unreachableNote = unreachableLegs.length
+            ? ` | UNREACHABLE (dashed red ring, frozen angles): leg ${unreachableLegs.join(", leg ")}`
+            : "";
 
-        metaEl.textContent = `${legs.length} legs reporting | malformed serial lines: ${fmt(state.malformed_lines, "")}`;
+        metaEl.textContent = `${legs.length} legs reporting | malformed serial lines: ${fmt(state.malformed_lines, "")}${unreachableNote}`;
         jsonEl.textContent = JSON.stringify(state, null, 2);
     } catch (err) {
         statusEl.textContent = "error";

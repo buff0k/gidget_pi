@@ -184,7 +184,7 @@ def open_serial():
     return serial.Serial(SERIAL_PORT, BAUDRATE, timeout=0, write_timeout=0.2)
 
 
-def leg_state_payload(leg_xyz, angles, channels, mode, gait, fast, malformed_lines, telemetry, connected, channel_map_by_leg):
+def leg_state_payload(leg_xyz, angles, channels, mode, gait, fast, malformed_lines, telemetry, connected, channel_map_by_leg, reachable):
     legs = []
 
     for leg in range(hk.LEG_COUNT):
@@ -193,6 +193,13 @@ def leg_state_payload(leg_xyz, angles, channels, mode, gait, fast, malformed_lin
         femur_pivot, tibia_pivot = hk.leg_joint_positions(x, y, z)
         legs.append({
             "index": leg,
+            # False only in "walk": this tick's IK target was out of
+            # physical reach and the commanded angles are a stale hold-over
+            # from the last tick that *was* reachable, not a live solve -
+            # see leg_angles_for_frame() in hexapod_kinematics.py. A leg
+            # that lifts once during a gait and then looks frozen is
+            # exactly what a leg stuck here tick after tick looks like.
+            "reachable": reachable[leg],
             # Coxa-relative (matches the reference sketch's coordinate frame).
             "x": round(x, 1),
             "y": round(y, 1),
@@ -305,6 +312,12 @@ def main():
                         active_gait = gait
                     active_mode = mode
 
+                    # Only "walk" ever runs an IK solve that can fail
+                    # reachability - every other mode sends fixed/raw
+                    # angles with nothing to be unreachable, so this stays
+                    # all-True and the walk branch below overwrites it.
+                    reachable = {leg: True for leg in range(hk.LEG_COUNT)}
+
                     if mode == "calibrate_90":
                         # Raw, no trim - the mechanical horn-alignment
                         # reference (see hk.set_all_90()'s docstring). Every
@@ -335,7 +348,7 @@ def main():
                             channels = hk.angles_to_channels(hk.set_all_90(), calibration.channel_map_by_leg)
                     elif mode == "walk":
                         leg_xyz = hk.step_gait(gait_state, commanded_x, commanded_y, commanded_r, fast)
-                        angles = hk.leg_angles_for_frame(leg_xyz, previous_angles)
+                        angles, reachable = hk.leg_angles_for_frame(leg_xyz, previous_angles)
                         channels = hk.apply_trim(
                             hk.angles_to_channels(angles, calibration.channel_map_by_leg),
                             calibration.trim_by_channel,
@@ -386,6 +399,7 @@ def main():
                     save_state(leg_state_payload(
                         leg_xyz, angles, channels, active_mode, gait_state.gait, fast,
                         malformed_lines, telemetry, connected, calibration.channel_map_by_leg,
+                        reachable,
                     ))
 
                     elapsed = time.monotonic() - tick_start

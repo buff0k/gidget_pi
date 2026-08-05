@@ -449,16 +449,30 @@ def leg_angles_for_frame(leg_xyz, previous_angles=None):
     Run leg_ik for every leg. Legs whose target is unreachable keep their
     previous angles (matches the reference sketch's silent-skip behavior)
     or fall back to set_all_90() if no previous angles are known yet.
+
+    Returns (angles, reachable) - reachable is {leg: bool}, so a caller
+    (hexapod_controller.py's state payload) can surface "this leg's IK has
+    been silently failing and holding a stale angle" instead of that being
+    indistinguishable from normal, intentional stillness. A gait that
+    lifts a leg once and then appears frozen - angles genuinely not
+    changing tick to tick, not just moving too little to notice - is
+    exactly what continuous unreachable targets look like: HOME_X/Y/Z,
+    BODY_X/Y/Z, and the segment lengths were ported from a reference
+    chassis assumed mechanically identical to this one, and if that
+    assumption is even slightly off, the gait's stride can walk a leg
+    straight out of its reachable envelope a step or two in.
     """
     previous_angles = previous_angles or set_all_90()
     angles = {}
+    reachable = {}
 
     for leg in range(LEG_COUNT):
         x, y, z = leg_xyz[leg]
         result = leg_ik(leg, x, y, z)
+        reachable[leg] = result is not None
         angles[leg] = result if result is not None else previous_angles[leg]
 
-    return angles
+    return angles, reachable
 
 
 def angles_to_channels(angles, channel_map_by_leg):
@@ -520,12 +534,15 @@ if __name__ == "__main__":
         for _ in range(50):
             leg_xyz = step_gait(state, commanded_x=80, commanded_y=0, commanded_r=0, fast=True)
 
-        angles = leg_angles_for_frame(leg_xyz)
+        angles, reachable = leg_angles_for_frame(leg_xyz)
         channels = angles_to_channels(angles, demo_channel_map)
         assert len(channels) == CHANNEL_COUNT
         femur_pivot, tibia_pivot = leg_joint_positions(*leg_xyz[0])
         print(f"{gait_name}: leg0 xyz={leg_xyz[0]} angles={angles[0]} "
-              f"femur_pivot={femur_pivot} tibia_pivot={tibia_pivot}")
+              f"reachable={reachable[0]} femur_pivot={femur_pivot} tibia_pivot={tibia_pivot}")
+        if not all(reachable.values()):
+            print(f"  ! unreachable legs this gait: "
+                  f"{[leg for leg, ok in reachable.items() if not ok]}")
 
     print("set_all_90:", set_all_90()[0])
     print("angles_to_channels demo:", angles_to_channels(set_all_90(), demo_channel_map)[:3])
