@@ -281,27 +281,28 @@ update_hexapod_firmware() {
     log "Flashing firmware/servo2040/main.py to Servo 2040 at ${port}"
 
     # Interrupting a running MicroPython program and then immediately
-    # entering raw REPL mode is a known-flaky handshake - the interrupt
-    # itself can land fine while the very next protocol step times out.
-    # A retry is usually clean, since by then the board is already sitting
-    # at the idle >>> prompt from the first attempt.
+    # entering raw REPL mode is a known-flaky handshake - it can fail fast
+    # ("could not enter raw repl") or, worse, just hang indefinitely with
+    # no error at all. `timeout` bounds every attempt so this step can
+    # never block the rest of install.sh forever - a stuck attempt gets
+    # killed and counted as a failed attempt, not an indefinite hang.
     local attempt flashed
     flashed=0
 
     for attempt in 1 2 3; do
-        if "${VENV_DIR}/bin/python" -m mpremote connect "$port" cp "${REPO_DIR}/firmware/servo2040/main.py" :main.py; then
+        if timeout 15 "${VENV_DIR}/bin/python" -m mpremote connect "$port" cp "${REPO_DIR}/firmware/servo2040/main.py" :main.py; then
             flashed=1
             break
         fi
-        log "Flash attempt ${attempt} failed, retrying..."
+        log "Flash attempt ${attempt} failed or timed out, retrying..."
         sleep 1
     done
 
     if [ "$flashed" -eq 1 ]; then
-        "${VENV_DIR}/bin/python" -m mpremote connect "$port" reset || true
+        timeout 10 "${VENV_DIR}/bin/python" -m mpremote connect "$port" reset || true
         log "Servo 2040 firmware flashed"
     else
-        log "WARNING: Servo 2040 firmware flash failed after 3 attempts - board may need manual attention, see firmware/servo2040/README.md"
+        log "WARNING: Servo 2040 firmware flash failed after 3 attempts - board may need a manual reset, see firmware/servo2040/README.md"
     fi
 }
 

@@ -88,22 +88,32 @@ def read_lines(buffer):
     """
     Drain whatever is waiting on stdin without blocking, split on '\\n'.
 
-    Reads in chunks, not byte-by-byte - at the Pi's ~50Hz command rate this
-    is a genuinely continuous ~150-200 bytes/sec stream, and per-byte
-    poll()+read() overhead couldn't keep up with it. That backpressure is
-    the likely cause of the write timeouts seen only when the real
-    Pi-side service (constant 50Hz writes) is driving the connection,
-    never in manual mpremote testing (which never sustained that rate).
+    MUST read one byte at a time. MicroPython's sys.stdin.read(n) for n>1
+    blocks trying to fill the full requested size even after poll() has
+    confirmed data is ready - poll() only guarantees "at least 1 byte is
+    available", not "n bytes are available". A previous version of this
+    function read(256) per iteration to save per-byte overhead; that is
+    what was actually causing the board to hang/wedge, since the Pi sends
+    discrete ~150-200 byte JSON lines rather than a continuous stream, so
+    the 256-byte read routinely blocked waiting for bytes that weren't
+    coming. Every KeyboardInterrupt traceback captured during debugging
+    landed inside this function, which is consistent with the board being
+    stuck blocked here rather than looping.
+
+    read(1) is confirmed safe: poll()'s "readable" guarantee is exactly
+    "read(1) won't block". At the Pi's ~50Hz/~150-200 byte line rate this
+    is at most a few hundred read(1) calls per 20ms tick - well inside the
+    RP2040's budget - so there's no real throughput reason to batch here.
     """
     lines = []
 
     while poll.poll(0):
-        chunk = sys.stdin.read(256)
-        if not chunk:
+        ch = sys.stdin.read(1)
+        if not ch:
             break
-        buffer += chunk
-        while "\n" in buffer:
-            line, buffer = buffer.split("\n", 1)
+        buffer += ch
+        if ch == "\n":
+            line, buffer = buffer[:-1], ""
             lines.append(line)
 
     return lines, buffer
