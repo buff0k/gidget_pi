@@ -16,6 +16,12 @@ const fastToggle = document.getElementById("fastToggle");
 const rotateLeftBtn = document.getElementById("rotateLeftBtn");
 const rotateRightBtn = document.getElementById("rotateRightBtn");
 
+// Some browsers restore <select> state across a reload even without the
+// page asking for it. Every fresh load must start in Idle regardless of
+// whatever the form last showed - relying on the browser to "just default
+// to the first option" isn't guaranteed.
+modeSelect.value = "idle";
+
 const joystickCanvas = document.getElementById("joystickCanvas");
 const joystickCtx = joystickCanvas.getContext("2d");
 
@@ -217,6 +223,31 @@ function buildChannelGrid() {
 
 buildChannelGrid();
 
+// Keeps the sliders honest against what the hardware is actually doing,
+// not just whatever this page happened to load with. Only syncs while
+// Manual isn't the active mode - once you're in Manual and dragging a
+// slider, incoming state polls must not fight your input. This also means
+// switching into Manual always starts from the real current position
+// (read from hexapod_state.json) instead of silently resetting every
+// channel to 90 and causing an uncommanded movement - which is exactly
+// what a page reload used to do.
+function syncManualChannelsFromState(channels) {
+    if (modeSelect.value === "manual") return;
+    if (!Array.isArray(channels) || channels.length !== CHANNEL_COUNT) return;
+
+    for (let i = 0; i < CHANNEL_COUNT; i++) {
+        const value = Math.round(Number(channels[i]));
+        if (Number.isNaN(value)) continue;
+
+        manualChannels[i] = value;
+
+        const slider = document.getElementById(`channelSlider${i}`);
+        const valueSpan = document.getElementById(`channelValue${i}`);
+        if (slider) slider.value = String(value);
+        if (valueSpan) valueSpan.textContent = `${value}°`;
+    }
+}
+
 
 // ---- Command heartbeat ----
 //
@@ -225,7 +256,11 @@ buildChannelGrid();
 // controller's staleness/deadman timeout (0.5s) needs fresh commands on a
 // steady cadence regardless of what's driving them.
 
+let sessionSuperseded = false;
+
 async function sendCommand() {
+    if (sessionSuperseded) return;
+
     const body = {
         mode: modeSelect.value,
         gait: gaitSelect.value,
@@ -234,15 +269,24 @@ async function sendCommand() {
         y: stickY,
         r: rotateValue,
         manual_channels: manualChannels,
+        session_id: window.GIDGET_SESSION_ID,
         source: "web-joystick",
     };
 
     try {
-        await fetch("/hexapod/api/command", {
+        const res = await fetch("/hexapod/api/command", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(body),
         });
+
+        if (res.status === 409) {
+            // Another tab/reload has taken over command authority - stop
+            // hammering a rejected session and make it obvious why the
+            // controls have gone dead, rather than failing silently.
+            sessionSuperseded = true;
+            setStatus(false, "Another tab has taken control - reload this page");
+        }
     } catch (e) {
         // Best-effort - the next heartbeat tick will retry, and the
         // controller's staleness timeout covers a dropped connection.
@@ -415,6 +459,8 @@ async function refreshState() {
         setText(gaitEl, fmt(state.gait));
         setText(voltageEl, fmtNum(telemetry.voltage_v, 2, " V"));
         setText(currentEl, fmtNum(telemetry.current_a, 2, " A"));
+
+        syncManualChannelsFromState(state.channels);
 
         drawLegs(legs);
 

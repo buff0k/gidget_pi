@@ -90,5 +90,13 @@
 {% endblock %}
 
 {% block scripts %}
+<script>
+    // Claimed fresh by the server on every page load (see pages/hexapod.py
+    // index()) - only this session's commands are accepted. A tab left
+    // open in the background loses command authority the instant a newer
+    // tab/reload claims it, rather than being able to keep silently
+    // overwriting whatever the operator is actually looking at.
+    window.GIDGET_SESSION_ID = {{ session_id | tojson }};
+</script>
 <script src="/static/hexapod.js"></script>
 {% endblock %}

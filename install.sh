@@ -157,6 +157,7 @@ sync_application_files() {
     rsync -a --delete \
         --exclude '.venv/' \
         --exclude 'config/users.json' \
+        --exclude 'config/secret_key' \
         --exclude 'data/tracks/*.jsonl' \
         "${REPO_DIR}/gidget/" "${APP_DIR}/"
 

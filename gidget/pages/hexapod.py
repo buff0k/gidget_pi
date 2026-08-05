@@ -1,4 +1,5 @@
 import json
+import secrets
 import time
 from pathlib import Path
 
@@ -10,6 +11,7 @@ import hexapod_kinematics as hk
 
 STATE_FILE = Path("/dev/shm/gidget/hexapod_state.json")
 COMMAND_FILE = Path("/dev/shm/gidget/hexapod_command.json")
+SESSION_FILE = Path("/dev/shm/gidget/hexapod_session.json")
 
 VALID_MODES = ("idle", "walk", "calibrate_90", "manual")
 CHANNEL_COUNT = 18
@@ -64,10 +66,34 @@ def sanitize_manual_channels(value):
         return None
 
 
+def write_json_atomic(path, data):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_file = path.with_suffix(".tmp")
+    temp_file.write_text(json.dumps(data, separators=(",", ":")))
+    temp_file.replace(path)
+
+
+def current_session_id():
+    if not SESSION_FILE.exists():
+        return None
+
+    try:
+        return json.loads(SESSION_FILE.read_text()).get("session_id")
+    except Exception:
+        return None
+
+
 @blueprint.route("/")
 @login_required
 def index():
-    return render_template("hexapod.html")
+    # Every page load claims exclusive command authority. A tab left open
+    # from earlier testing that keeps heartbeating in the background can no
+    # longer silently win a "most recent write" race against whatever tab
+    # the operator is actually looking at - its commands get rejected the
+    # instant a newer session exists, not just eventually timed out.
+    session_id = secrets.token_hex(8)
+    write_json_atomic(SESSION_FILE, {"session_id": session_id, "started_at": time.time()})
+    return render_template("hexapod.html", session_id=session_id)
 
 
 @blueprint.route("/api/state")
@@ -86,6 +112,14 @@ def api_command():
     way; hexapod_controller.py never knows or cares which one wrote it.
     """
     data = request.get_json(silent=True) or {}
+
+    # Only the session that most recently loaded /hexapod/ may command
+    # anything - see index() above. A stale/background tab's POSTs are
+    # rejected outright rather than silently overwriting a newer tab's
+    # commands, which is exactly what let an old Calibrate-mode session
+    # keep driving the hexapod after the operator had switched to Idle.
+    if data.get("session_id") != current_session_id():
+        return jsonify({"ok": False, "error": "session superseded - reload the page"}), 409
 
     mode = data.get("mode", "idle")
     if mode not in VALID_MODES:
