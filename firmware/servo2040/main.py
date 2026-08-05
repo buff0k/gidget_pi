@@ -33,7 +33,7 @@ import time
 import json
 
 from machine import Pin
-from servo import ServoCluster, servo2040
+from servo import ServoCluster, Calibration, servo2040
 from pimoroni import Analog, AnalogMux
 
 
@@ -55,13 +55,41 @@ adc_mux = AnalogMux(
 
 cluster = ServoCluster(0, 0, list(range(servo2040.SERVO_1, servo2040.SERVO_18 + 1)))
 
+# CRITICAL: Pimoroni's default calibration (ANGULAR) centers on a raw value
+# of 0, with a range of -90..+90 - NOT 0-180 with 90 as center. Confirmed
+# directly against Pimoroni's own servo module README and example code
+# (servo2040/calibration.py's own comment: "By default its value ranges
+# from -90 to +90"; servo_cluster.py's sweep demo uses all_to_mid() for
+# center and a +/-90 sweep extent). Every other part of this project
+# (hexapod_kinematics.py's IK math, hexapod_controller.py, the web UI's
+# manual sliders) assumes the opposite convention - a 0-180 range with 90
+# as center, matching how servo angles are conventionally described and
+# how MG996 datasheets specify them. Sending a raw 90 under the DEFAULT
+# calibration therefore drives every channel to its full end-of-travel,
+# not center - a 90 degree error, and almost certainly what's been
+# happening on every power-up so far, before the Pi even connects.
+#
+# Rather than rewrite the 0-180 convention across six files, each channel
+# gets a custom calibration here instead: apply_three_pairs maps the SAME
+# physical pulse widths (500-2500us, the standard hobby-servo full range)
+# onto 0-180 with 90 as center. The actual PWM output for a given physical
+# position is identical to Pimoroni's default - only the number used to
+# ask for that position changes, to match what the rest of this project
+# already assumes. This MUST happen before the neutral-value loop below,
+# so the very first pulse each servo ever sees this power-cycle is under
+# the corrected calibration, not the default one.
+for _channel in range(NUM_CHANNELS):
+    _cal = Calibration()
+    _cal.apply_three_pairs(500, 1500, 2500, 0, 90, 180)
+    cluster.calibration(_channel, _cal)
+
 # Command a safe neutral BEFORE enabling PWM output, not after. A channel's
 # value before its first explicit .value() call is whatever ServoCluster
 # defaults to internally, which was never actually confirmed safe - if it
-# is not 90deg, enable_all() would drive straight to that default the
-# instant output turns on, before the watchdog below ever gets a chance to
-# intervene. This is very likely what caused servos to slam to extremes on
-# power-up even with nothing sending commands yet.
+# is not 90deg (now correctly meaning center, per the calibration fix
+# above), enable_all() would drive straight to that default the instant
+# output turns on, before the watchdog below ever gets a chance to
+# intervene.
 for _channel in range(NUM_CHANNELS):
     cluster.value(_channel, 90.0)
 

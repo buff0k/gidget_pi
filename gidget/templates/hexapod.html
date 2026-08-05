@@ -63,12 +63,82 @@
         <p class="muted">
             Drives individual Servo 2040 channels directly, bypassing gait/IK
             entirely - useful for bring-up with only a few servos wired, or
-            for checking one channel's range before <code>CHANNEL_MAP</code>
-            is finalized. Only takes effect while Mode above is set to
-            "Manual" - sliders are otherwise inert.
+            for checking one channel's range before it's assigned in the
+            Channel Mapping panel below. Only takes effect while Mode above
+            is set to "Manual" - sliders are otherwise inert.
         </p>
 
         <div class="channel-grid" id="channelGrid"></div>
+    </div>
+
+    <div class="card">
+        <h2>Calibration</h2>
+
+        <p class="muted">
+            Fine-tunes one channel's true center. Two-step process: first use
+            "Calibrate (all servos to 90&deg;)" above to mechanically re-seat
+            horns against a shared, literal-90&deg; reference; then, per
+            channel here, nudge until it looks physically centered and save.
+            Trim applies automatically in Idle and Walk - Manual and
+            Calibrate-90 stay raw (untrimmed) on purpose, so they're always a
+            trustworthy reference while calibrating.
+        </p>
+
+        <label for="calibChannelSelect">Channel</label>
+        <select id="calibChannelSelect"></select>
+
+        <div class="metric"><div class="label">Current trim</div><div id="calibTrimValue" class="value">n/a</div></div>
+
+        <div class="row" style="justify-content: center;">
+            <button id="calibNudgeMinus5" type="button">&minus;5&deg;</button>
+            <button id="calibNudgeMinus1" type="button">&minus;1&deg;</button>
+            <button id="calibNudgePlus1" type="button">+1&deg;</button>
+            <button id="calibNudgePlus5" type="button">+5&deg;</button>
+        </div>
+        <span id="calibStatus" class="small-text"></span>
+    </div>
+
+    <div class="card">
+        <h2>Channel Mapping</h2>
+
+        <p class="muted">
+            Confirms which physical leg/joint each of the 18 channels drives.
+            Press and hold "Test" to jog the selected channel away from
+            neutral and back - watch which servo twitches - then assign it
+            below. Only meaningful in Idle mode, so every other channel is
+            sitting still at calibrated neutral while you watch.
+        </p>
+
+        <label for="mapChannelSelect">Channel</label>
+        <select id="mapChannelSelect"></select>
+
+        <div class="metric"><div class="label">Currently assigned</div><div id="mapCurrentAssignment" class="value">n/a</div></div>
+
+        <div class="row" style="justify-content: center;">
+            <button id="mapTestBtn" type="button">Press &amp; hold to test</button>
+        </div>
+
+        <label for="mapLegSelect">Leg</label>
+        <select id="mapLegSelect">
+            <option value="0">Leg 0</option>
+            <option value="1">Leg 1</option>
+            <option value="2">Leg 2</option>
+            <option value="3">Leg 3</option>
+            <option value="4">Leg 4</option>
+            <option value="5">Leg 5</option>
+        </select>
+
+        <label for="mapJointSelect">Joint</label>
+        <select id="mapJointSelect">
+            <option value="coxa">Coxa</option>
+            <option value="femur">Femur</option>
+            <option value="tibia">Tibia</option>
+        </select>
+
+        <div class="row" style="justify-content: center;">
+            <button id="mapAssignBtn" type="button">Assign</button>
+        </div>
+        <span id="mapStatus" class="small-text"></span>
     </div>
 
     <div class="card">

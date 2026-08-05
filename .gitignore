@@ -2,6 +2,7 @@ __pycache__/
 *.pyc
 .venv/
 gidget/config/users.json
+gidget/config/hexapod_calibration.json
 gidget/status_state.json
 gidget/environment_state.json
 gidget/lidar_state.json

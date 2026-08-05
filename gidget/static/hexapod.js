@@ -249,6 +249,155 @@ function syncManualChannelsFromState(channels) {
 }
 
 
+// ---- Calibration & Channel Mapping ----
+//
+// Both panels write straight to hexapod_calibration.json via small REST
+// endpoints (not the command relay) - hexapod_controller.py picks up
+// changes within ~1s (see CalibrationCache in hexapod_controller.py). The
+// Channel Mapping panel's "test" jog is the one exception: it borrows the
+// existing Manual-mode command path to move exactly one channel briefly,
+// rather than adding a second live-command mechanism.
+
+const calibChannelSelect = document.getElementById("calibChannelSelect");
+const calibTrimValue = document.getElementById("calibTrimValue");
+const calibStatus = document.getElementById("calibStatus");
+
+const mapChannelSelect = document.getElementById("mapChannelSelect");
+const mapCurrentAssignment = document.getElementById("mapCurrentAssignment");
+const mapLegSelect = document.getElementById("mapLegSelect");
+const mapJointSelect = document.getElementById("mapJointSelect");
+const mapTestBtn = document.getElementById("mapTestBtn");
+const mapAssignBtn = document.getElementById("mapAssignBtn");
+const mapStatus = document.getElementById("mapStatus");
+
+let lastCalibration = { channel_map: {}, trim_deg: {} };
+// {channel, offset} while mapTestBtn is held - read by
+// buildManualChannelsForSend() in the heartbeat below.
+let testChannelOverride = null;
+let modeBeforeTest = null;
+
+function populateChannelSelect(select) {
+    for (let i = 0; i < CHANNEL_COUNT; i++) {
+        const opt = document.createElement("option");
+        opt.value = String(i);
+        opt.textContent = `Channel ${i}`;
+        select.appendChild(opt);
+    }
+}
+
+populateChannelSelect(calibChannelSelect);
+populateChannelSelect(mapChannelSelect);
+
+function jointLabel(joint) {
+    if (!joint) return "n/a";
+    return joint.charAt(0).toUpperCase() + joint.slice(1);
+}
+
+function renderCalibrationDisplays() {
+    const trim = (lastCalibration.trim_deg || {})[calibChannelSelect.value];
+    calibTrimValue.textContent = trim === undefined ? "n/a" : `${Number(trim).toFixed(1)}°`;
+
+    const entry = (lastCalibration.channel_map || {})[mapChannelSelect.value];
+    mapCurrentAssignment.textContent = entry
+        ? `Leg ${entry.leg} / ${jointLabel(entry.joint)}`
+        : "n/a";
+}
+
+async function fetchCalibration() {
+    try {
+        const res = await fetch("/hexapod/api/calibration", { cache: "no-store" });
+        if (!res.ok) return;
+        lastCalibration = await res.json();
+        renderCalibrationDisplays();
+    } catch (e) {
+        // Best-effort - the next poll retries.
+    }
+}
+
+calibChannelSelect.addEventListener("change", renderCalibrationDisplays);
+mapChannelSelect.addEventListener("change", renderCalibrationDisplays);
+
+async function nudgeTrim(delta) {
+    const channel = Number(calibChannelSelect.value);
+
+    try {
+        const res = await fetch("/hexapod/api/calibration/trim", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ channel, delta, session_id: window.GIDGET_SESSION_ID }),
+        });
+        const body = await res.json();
+
+        if (!res.ok) {
+            calibStatus.textContent = body.error || "Save failed";
+            return;
+        }
+
+        lastCalibration = body.calibration;
+        renderCalibrationDisplays();
+        calibStatus.textContent = "Saved";
+        setTimeout(() => { calibStatus.textContent = ""; }, 1500);
+    } catch (e) {
+        calibStatus.textContent = "Save failed - offline?";
+    }
+}
+
+document.getElementById("calibNudgeMinus5").addEventListener("click", () => nudgeTrim(-5));
+document.getElementById("calibNudgeMinus1").addEventListener("click", () => nudgeTrim(-1));
+document.getElementById("calibNudgePlus1").addEventListener("click", () => nudgeTrim(1));
+document.getElementById("calibNudgePlus5").addEventListener("click", () => nudgeTrim(5));
+
+// Borrows Manual mode to move exactly the selected channel a bounded
+// amount away from its current position and back, so the operator can
+// watch which physical joint responds. No direct serial write happens
+// here - it only sets state the next heartbeat tick picks up.
+function startChannelTest() {
+    modeBeforeTest = modeSelect.value;
+    modeSelect.value = "manual";
+    testChannelOverride = { channel: Number(mapChannelSelect.value), offset: 25 };
+}
+
+function stopChannelTest() {
+    testChannelOverride = null;
+    if (modeBeforeTest !== null) {
+        modeSelect.value = modeBeforeTest;
+        modeBeforeTest = null;
+    }
+}
+
+bindHoldButton(mapTestBtn, startChannelTest, stopChannelTest);
+
+mapAssignBtn.addEventListener("click", async () => {
+    const channel = Number(mapChannelSelect.value);
+    const leg = Number(mapLegSelect.value);
+    const joint = mapJointSelect.value;
+
+    try {
+        const res = await fetch("/hexapod/api/calibration/channel_map", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ channel, leg, joint, session_id: window.GIDGET_SESSION_ID }),
+        });
+        const body = await res.json();
+
+        if (!res.ok) {
+            mapStatus.textContent = body.error || "Assign failed";
+            return;
+        }
+
+        lastCalibration = body.calibration;
+        renderCalibrationDisplays();
+        mapStatus.textContent = "Assigned";
+        setTimeout(() => { mapStatus.textContent = ""; }, 1500);
+    } catch (e) {
+        mapStatus.textContent = "Assign failed - offline?";
+    }
+});
+
+fetchCalibration();
+setInterval(fetchCalibration, STATE_POLL_MS);
+
+
 // ---- Command heartbeat ----
 //
 // Runs continuously, not just while the joystick is being dragged, so a
@@ -257,6 +406,23 @@ function syncManualChannelsFromState(channels) {
 // steady cadence regardless of what's driving them.
 
 let sessionSuperseded = false;
+
+// While the Channel Mapping panel's test button is held, sends a copy of
+// manualChannels with just the tested channel offset - never mutates
+// manualChannels itself, so the Manual panel's sliders aren't disturbed by
+// a test jog.
+function buildManualChannelsForSend() {
+    if (!testChannelOverride) return manualChannels;
+
+    const copy = manualChannels.slice();
+    const idx = testChannelOverride.channel;
+    const base = copy[idx];
+    let target = base + testChannelOverride.offset;
+    if (target > 180) target = base - testChannelOverride.offset;
+    target = Math.max(0, Math.min(180, target));
+    copy[idx] = target;
+    return copy;
+}
 
 async function sendCommand() {
     if (sessionSuperseded) return;
@@ -268,7 +434,7 @@ async function sendCommand() {
         x: stickX,
         y: stickY,
         r: rotateValue,
-        manual_channels: manualChannels,
+        manual_channels: buildManualChannelsForSend(),
         session_id: window.GIDGET_SESSION_ID,
         source: "web-joystick",
     };

@@ -41,8 +41,16 @@ The `Analog`/`AnalogMux` construction in `main.py` is matched verbatim against P
 
 Once telemetry looks right, confirm servo motion separately — telemetry failing doesn't necessarily mean channel commands aren't being applied, and vice versa. With `gidget-hexapod.service` running, use the Manual/Diagnostics sliders on `/hexapod/` to drive individual channels directly.
 
+## Calibration convention (0-180, 90 = center) - NOT Pimoroni's default
+
+Pimoroni's default `ServoCluster`/`Servo` calibration (`ANGULAR`) centers on a raw value of **0**, with a range of **-90..+90** - not 0-180 with 90 as center. Confirmed directly against Pimoroni's own source, not inferred:
+- `servo2040/calibration.py`'s own comment: `# By default its value ranges from -90 to +90`.
+- `servo2040/servo_cluster.py`'s sweep demo: `all_to_mid()` is the center call, and its sweep uses a `+/-90` extent around it.
+
+Everything else in this project (`gidget/hexapod_kinematics.py`'s IK math, `gidget/hexapod_controller.py`, the web UI's manual sliders and Calibration panel) assumes the conventional 0-180-with-90-as-center range. Sending a raw `90` under Pimoroni's *default* calibration therefore drives a channel to its full end-of-travel, not center — a 90 degree error. `main.py` fixes this at startup, before anything is ever commanded, by giving every channel a custom `Calibration` (`apply_three_pairs(500, 1500, 2500, 0, 90, 180)`) that maps the *same* physical pulse widths (500-2500us, the standard hobby-servo full range) onto 0-180 instead. The actual PWM output for a given physical position is unchanged from Pimoroni's default — only the number used to ask for it changes. If this firmware is ever rewritten from scratch, this step is not optional: skipping it means every "90" sent from the Pi side actually means "full deflection."
+
 ## Once wired to the actual hexapod
 
-Two things in `gidget/hexapod_kinematics.py` on the Pi side need real values from this board once it's wired up — this firmware doesn't need any changes for either:
-- `CHANNEL_MAP` — which of the 18 channels drives which (leg, joint).
+Two things need real values from this board once it's wired up — this firmware doesn't need any changes for either, and both are edited live from the `/hexapod/` web UI (Calibration and Channel Mapping panels), not hardcoded:
+- The channel map — which of the 18 channels drives which (leg, joint). Persisted in `config/hexapod_calibration.json` on the Pi (see `gidget/hexapod_calibration.py`), not in this firmware.
 - The udev rule (`udev/99-gidget-servo2040.rules`) — needs this board's actual USB VID:PID, found via `lsusb` once it's plugged into the Pi.

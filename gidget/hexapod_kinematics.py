@@ -7,9 +7,20 @@ reference Hexapod.ino sketch (Arduino Mega + PS2 gamepad + Servo library),
 adapted to run on the Pi instead of the Servo 2040 so the per-leg X/Y/Z
 computed every frame can be reused directly for the web UI's leg visualizer.
 
-Leg numbering (0-5) matches the reference sketch's leg1..leg6. Geometry,
-home/body offsets, and calibration constants are ported as final values -
-confirmed correct for this chassis, not placeholders.
+Leg numbering (0-5) matches the reference sketch's leg1..leg6. Geometry and
+home/body offsets are ported as final values - confirmed correct for this
+chassis, not placeholders.
+
+Per-servo calibration trim and the channel map are NOT ported from the
+reference sketch, and deliberately do not live in this file. Trim (how far
+a channel's true physical center sits from a literal 90 deg command) and
+channel assignment (which of the 18 channels drives which leg/joint) are
+facts about this specific robot's individual servos and wiring - they were
+wrongly treated as portable constants early in this project, which is why
+servos looked "calibrated" but weren't truly centered. Both now live in
+hexapod_calibration.py as persisted, hand-edited config; this module stays
+pure geometry with zero hardware/config-file knowledge, as the module
+summary above promises.
 """
 
 import math
@@ -17,6 +28,8 @@ from dataclasses import dataclass, field
 
 
 LEG_COUNT = 6
+CHANNEL_COUNT = 18
+JOINTS = ("coxa", "femur", "tibia")
 
 # Leg segment lengths, mm.
 COXA_LENGTH = 51.0
@@ -32,23 +45,6 @@ HOME_Z = (-80.0, -80.0, -80.0, -80.0, -80.0, -80.0)
 BODY_X = (110.4, 0.0, -110.4, -110.4, 0.0, 110.4)
 BODY_Y = (58.4, 90.8, 58.4, -58.4, -90.8, -58.4)
 BODY_Z = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
-
-# Per-leg servo calibration offsets, degrees.
-COXA_CAL = (2, -1, -1, -3, -2, -3)
-FEMUR_CAL = (4, -2, 0, -1, 0, 0)
-TIBIA_CAL = (0, -3, -3, -2, -3, -1)
-
-# Which of the Servo 2040's 18 channels drives which (leg, joint).
-# PLACEHOLDER - sequential 0-17 in leg order. This is a wiring fact about
-# the Servo 2040 build, not the mechanical chassis - update once wired.
-CHANNEL_MAP = {
-    0: {"coxa": 0, "femur": 1, "tibia": 2},
-    1: {"coxa": 3, "femur": 4, "tibia": 5},
-    2: {"coxa": 6, "femur": 7, "tibia": 8},
-    3: {"coxa": 9, "femur": 10, "tibia": 11},
-    4: {"coxa": 12, "femur": 13, "tibia": 14},
-    5: {"coxa": 15, "femur": 16, "tibia": 17},
-}
 
 FRAME_TIME_MS = 20.0
 
@@ -95,19 +91,16 @@ def leg_ik(leg_number, x, y, z):
         ((FEMUR_LENGTH ** 2) + (TIBIA_LENGTH ** 2) - (l3 ** 2))
         / (2 * FEMUR_LENGTH * TIBIA_LENGTH)
     )
-    theta_tibia = clamp(math.degrees(phi_tibia) - 23.0 + TIBIA_CAL[leg_number], 0.0, 180.0)
+    theta_tibia = clamp(math.degrees(phi_tibia) - 23.0, 0.0, 180.0)
 
     gamma_femur = math.atan2(z, l0)
     phi_femur = math.acos(
         ((FEMUR_LENGTH ** 2) + (l3 ** 2) - (TIBIA_LENGTH ** 2))
         / (2 * FEMUR_LENGTH * l3)
     )
-    theta_femur = clamp(
-        math.degrees(phi_femur + gamma_femur) + 14.0 + 90.0 + FEMUR_CAL[leg_number],
-        0.0, 180.0,
-    )
+    theta_femur = clamp(math.degrees(phi_femur + gamma_femur) + 14.0 + 90.0, 0.0, 180.0)
 
-    theta_coxa = math.degrees(math.atan2(x, y)) + COXA_CAL[leg_number]
+    theta_coxa = math.degrees(math.atan2(x, y))
     theta_coxa = _apply_coxa_mount_offset(leg_number, theta_coxa)
     theta_coxa = clamp(theta_coxa, 0.0, 180.0)
 
@@ -136,11 +129,16 @@ def _apply_coxa_mount_offset(leg_number, theta_coxa):
 
 
 def set_all_90():
-    """Calibration helper: all servos to 90 degrees plus per-leg trim."""
-    return {
-        leg: (90.0 + COXA_CAL[leg], 90.0 + FEMUR_CAL[leg], 90.0 + TIBIA_CAL[leg])
-        for leg in range(LEG_COUNT)
-    }
+    """
+    Every joint at a literal 90 degrees - no trim. This is the mechanical
+    horn-alignment reference position: with every channel commanded to the
+    same raw value, a horn that isn't visually centered gets loosened and
+    re-seated against this known-good reference, not electronically
+    compensated for. Software trim (hexapod_calibration.py) covers the
+    residual few-degree slop left over after that, applied later at the
+    channel-output boundary - see apply_trim().
+    """
+    return {leg: (90.0, 90.0, 90.0) for leg in range(LEG_COUNT)}
 
 
 def home_leg_xyz():
@@ -387,12 +385,18 @@ def leg_angles_for_frame(leg_xyz, previous_angles=None):
     return angles
 
 
-def angles_to_channels(angles):
-    """Map {leg: (coxa, femur, tibia)} to a flat 18-element channel array."""
-    channels = [90.0] * 18
+def angles_to_channels(angles, channel_map_by_leg):
+    """
+    Map {leg: (coxa, femur, tibia)} to a flat 18-element channel array,
+    using the wiring map ({leg: {joint: channel}}) supplied by the caller -
+    see hexapod_calibration.channel_map_by_leg(). No module-level default:
+    the channel map is a hardware fact about this specific robot's wiring,
+    discovered by hand, not something this pure-math module should guess at.
+    """
+    channels = [90.0] * CHANNEL_COUNT
 
     for leg, (coxa, femur, tibia) in angles.items():
-        mapping = CHANNEL_MAP[leg]
+        mapping = channel_map_by_leg[leg]
         channels[mapping["coxa"]] = coxa
         channels[mapping["femur"]] = femur
         channels[mapping["tibia"]] = tibia
@@ -400,8 +404,30 @@ def angles_to_channels(angles):
     return channels
 
 
+def apply_trim(channels, trim_deg_by_channel):
+    """
+    Adds each channel's calibration trim (a few degrees at most - the
+    residual gap between a servo's true physical center and a literal 90
+    deg command) and clamps to the servo's valid range. Applied once, at
+    the very end, after angles_to_channels - trim is a hardware fact about
+    one physical channel, not something IK/gait math should know about.
+    """
+    return [
+        clamp(channels[ch] + trim_deg_by_channel.get(ch, 0.0), 0.0, 180.0)
+        for ch in range(len(channels))
+    ]
+
+
 if __name__ == "__main__":
-    # Quick standalone smoke check - no hardware/Pi required.
+    # Quick standalone smoke check - no hardware/Pi/config file required.
+    # Uses a local sequential channel map purely for this check, so this
+    # module stays fully independent of hexapod_calibration.py's persisted
+    # config, matching the "pure math" guarantee in the module docstring.
+    demo_channel_map = {
+        leg: {"coxa": leg * 3, "femur": leg * 3 + 1, "tibia": leg * 3 + 2}
+        for leg in range(LEG_COUNT)
+    }
+
     for gait_name in GAIT_NAMES:
         state = GaitState()
         reset_gait_state(state, gait_name)
@@ -410,9 +436,11 @@ if __name__ == "__main__":
             leg_xyz = step_gait(state, commanded_x=80, commanded_y=0, commanded_r=0, fast=True)
 
         angles = leg_angles_for_frame(leg_xyz)
-        channels = angles_to_channels(angles)
-        assert len(channels) == 18
+        channels = angles_to_channels(angles, demo_channel_map)
+        assert len(channels) == CHANNEL_COUNT
         print(f"{gait_name}: leg0 xyz={leg_xyz[0]} angles={angles[0]}")
 
     print("set_all_90:", set_all_90()[0])
+    print("angles_to_channels demo:", angles_to_channels(set_all_90(), demo_channel_map)[:3])
+    print("apply_trim demo:", apply_trim([90.0] * CHANNEL_COUNT, {0: 3.5, 4: -2.0}))
     print("OK")

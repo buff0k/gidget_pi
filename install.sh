@@ -158,6 +158,7 @@ sync_application_files() {
         --exclude '.venv/' \
         --exclude 'config/users.json' \
         --exclude 'config/secret_key' \
+        --exclude 'config/hexapod_calibration.json' \
         --exclude 'data/tracks/*.jsonl' \
         "${REPO_DIR}/gidget/" "${APP_DIR}/"
 

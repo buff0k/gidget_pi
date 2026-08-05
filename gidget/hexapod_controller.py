@@ -17,6 +17,7 @@ from pathlib import Path
 
 import serial
 
+import hexapod_calibration as hcal
 import hexapod_kinematics as hk
 
 
@@ -48,14 +49,13 @@ TELEMETRY_STALE_SECONDS = 3.0
 # 20Hz on the wire is still smooth enough for servo motion.
 SERIAL_SEND_INTERVAL_SECONDS = 0.05
 
-# Calibrated neutral: 90 deg plus each servo's small per-joint trim
-# (COXA_CAL/FEMUR_CAL/TIBIA_CAL, a few degrees at most), NOT a flat 90 for
-# every channel. Flat 90 is close enough to "neutral" to be safe, but it is
-# not each servo's true calibrated center, which is what idle/manual should
-# rest at when nothing else is commanding the leg. This is distinct from the
-# home-stance danger below: home-stance angles are tens of degrees off
-# center (e.g. femur=146), calibration trim is single digits.
-NEUTRAL_CHANNELS = hk.angles_to_channels(hk.set_all_90())
+# Calibration/channel-map config lives on the SD card (/opt/gidget/config),
+# not tmpfs - checking it every 20ms tick would be exactly the kind of
+# high-frequency SD card access this project's tmpfs-for-live-state design
+# was meant to avoid. Reloaded on this much coarser cadence instead; still
+# fast enough that a Calibration-panel nudge is visible within about a
+# second, which is plenty for a human watching the servo move.
+CALIBRATION_RELOAD_SECONDS = 1.0
 
 _shutdown_requested = False
 
@@ -67,6 +67,42 @@ def request_shutdown(signum, frame):
 
 signal.signal(signal.SIGTERM, request_shutdown)
 signal.signal(signal.SIGINT, request_shutdown)
+
+
+class CalibrationCache:
+    """
+    Loads hexapod_calibration.py's persisted trim/channel-map config and
+    re-reads it only every CALIBRATION_RELOAD_SECONDS (an mtime check, not
+    a full read, on ticks where a reload isn't due) - see the constant
+    above for why. This is what lets the Calibration/Channel Mapping web
+    panels edit the config file directly and have it take effect live,
+    without a service restart.
+    """
+
+    def __init__(self):
+        self._last_check = 0.0
+        self._mtime = None
+        self.channel_map_by_leg = {}
+        self.trim_by_channel = {}
+        self.neutral_channels = [90.0] * hk.CHANNEL_COUNT
+        self._reload()
+
+    def _reload(self):
+        data = hcal.load_calibration()
+        self.channel_map_by_leg = hcal.channel_map_by_leg(data)
+        self.trim_by_channel = hcal.trim_by_channel(data)
+        self.neutral_channels = hk.apply_trim(
+            hk.angles_to_channels(hk.set_all_90(), self.channel_map_by_leg),
+            self.trim_by_channel,
+        )
+        self._mtime = hcal.calibration_mtime()
+
+    def maybe_reload(self, now):
+        if now - self._last_check < CALIBRATION_RELOAD_SECONDS:
+            return
+        self._last_check = now
+        if hcal.calibration_mtime() != self._mtime:
+            self._reload()
 
 
 def utc_now_iso():
@@ -148,7 +184,7 @@ def open_serial():
     return serial.Serial(SERIAL_PORT, BAUDRATE, timeout=0, write_timeout=0.2)
 
 
-def leg_state_payload(leg_xyz, angles, channels, mode, gait, fast, malformed_lines, telemetry, connected):
+def leg_state_payload(leg_xyz, angles, channels, mode, gait, fast, malformed_lines, telemetry, connected, channel_map_by_leg):
     legs = []
 
     for leg in range(hk.LEG_COUNT):
@@ -169,7 +205,7 @@ def leg_state_payload(leg_xyz, angles, channels, mode, gait, fast, malformed_lin
             "coxa_deg": round(coxa, 1),
             "femur_deg": round(femur, 1),
             "tibia_deg": round(tibia, 1),
-            "channels": hk.CHANNEL_MAP[leg],
+            "channels": channel_map_by_leg[leg],
         })
 
     return {
@@ -211,6 +247,7 @@ def main():
     last_telemetry_time = 0.0
     active_gait = gait_state.gait
     active_mode = "idle"
+    calibration = CalibrationCache()
 
     while True:
         try:
@@ -237,6 +274,8 @@ def main():
                             pass
                         return
 
+                    calibration.maybe_reload(tick_start)
+
                     command = read_command()
 
                     mode = command.get("mode", "idle")
@@ -258,27 +297,40 @@ def main():
                     active_mode = mode
 
                     if mode == "calibrate_90":
+                        # Raw, no trim - the mechanical horn-alignment
+                        # reference (see hk.set_all_90()'s docstring). Every
+                        # channel gets a literal 90 so horns can be
+                        # loosened and re-seated against a known-common
+                        # reference; trim compensates for the residual
+                        # slop left AFTER that, so applying it here would
+                        # defeat the point of this mode.
                         angles = hk.set_all_90()
                         leg_xyz = hk.home_leg_xyz()
-                        channels = hk.angles_to_channels(angles)
+                        channels = hk.angles_to_channels(angles, calibration.channel_map_by_leg)
                     elif mode == "manual":
                         # Bypasses gait/IK entirely - raw per-channel angles
                         # for wiring/bring-up diagnostics (e.g. testing a
-                        # couple of servos before the full rig is wired, or
-                        # probing one channel's range). Leg/angle state is
-                        # left at its last known value since it's not
-                        # meaningful without an IK solve.
+                        # couple of servos before the full rig is wired,
+                        # probing one channel's range, or the Channel
+                        # Mapping panel's test-jog). Leg/angle state is left
+                        # at its last known value since it's not meaningful
+                        # without an IK solve. Deliberately raw like
+                        # calibrate_90, not calibration.neutral_channels -
+                        # manual is the other mode meant to bypass trim.
                         angles = previous_angles
                         leg_xyz = gait_state.leg_xyz
                         manual_channels = command.get("manual_channels")
                         if isinstance(manual_channels, list) and len(manual_channels) == 18:
                             channels = [hk.clamp(float(v), 0.0, 180.0) for v in manual_channels]
                         else:
-                            channels = list(NEUTRAL_CHANNELS)
+                            channels = hk.angles_to_channels(hk.set_all_90(), calibration.channel_map_by_leg)
                     elif mode == "walk":
                         leg_xyz = hk.step_gait(gait_state, commanded_x, commanded_y, commanded_r, fast)
                         angles = hk.leg_angles_for_frame(leg_xyz, previous_angles)
-                        channels = hk.angles_to_channels(angles)
+                        channels = hk.apply_trim(
+                            hk.angles_to_channels(angles, calibration.channel_map_by_leg),
+                            calibration.trim_by_channel,
+                        )
                     else:
                         # "idle" (and any unrecognized mode, including the
                         # stale-command fallback in read_command()) is a
@@ -289,11 +341,12 @@ def main():
                         # physically calibrated against a known 90 deg
                         # reference. Idle must never depend on that having
                         # happened yet - but it should still rest at each
-                        # servo's small per-joint trim (NEUTRAL_CHANNELS),
-                        # not an untrimmed flat 90 for every channel.
+                        # channel's calibrated trim (calibration.neutral_-
+                        # channels), not an untrimmed flat 90 for every
+                        # channel.
                         angles = previous_angles
                         leg_xyz = gait_state.leg_xyz
-                        channels = list(NEUTRAL_CHANNELS)
+                        channels = list(calibration.neutral_channels)
 
                     previous_angles = angles
 
@@ -323,7 +376,7 @@ def main():
 
                     save_state(leg_state_payload(
                         leg_xyz, angles, channels, active_mode, gait_state.gait, fast,
-                        malformed_lines, telemetry, connected,
+                        malformed_lines, telemetry, connected, calibration.channel_map_by_leg,
                     ))
 
                     elapsed = time.monotonic() - tick_start
